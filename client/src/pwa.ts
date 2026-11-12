@@ -16,11 +16,9 @@ export interface PwaState {
   canInstall: boolean
   /** Хранилище помечено постоянным: браузер не сотрёт его сам. null — неизвестно */
   persisted: boolean | null
-  /** Приложение уже установлено с этого сайта (Chrome на Android умеет это сообщить). null — неизвестно */
-  installed: boolean | null
 }
 
-let state: PwaState = { updateReady: false, canInstall: false, persisted: null, installed: null }
+let state: PwaState = { updateReady: false, canInstall: false, persisted: null }
 const listeners = new Set<() => void>()
 let waiting: ServiceWorker | null = null
 let installEvent: BeforeInstallPromptEvent | null = null
@@ -48,10 +46,6 @@ export function isStandalone(): boolean {
   )
 }
 
-export function isAndroid(): boolean {
-  return /Android/i.test(navigator.userAgent)
-}
-
 /** iPhone/iPad: там установить можно только вручную, через «Поделиться → На экран „Домой“» */
 export function isIos(): boolean {
   return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
@@ -65,14 +59,8 @@ export function initPwa(): void {
   })
   window.addEventListener('appinstalled', () => {
     installEvent = null
-    set({ canInstall: false, installed: true })
+    set({ canInstall: false })
   })
-  // Работает в Chrome на Android благодаря related_applications в manifest.json
-  const nav = navigator as Navigator & { getInstalledRelatedApps?: () => Promise<unknown[]> }
-  void nav
-    .getInstalledRelatedApps?.()
-    .then((apps) => set({ installed: apps.length > 0 }))
-    .catch(() => {})
   void navigator.storage?.persisted?.().then((persisted) => set({ persisted }))
 
   if (!import.meta.env.PROD || !('serviceWorker' in navigator)) return

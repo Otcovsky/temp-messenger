@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { applyUpdate, isAndroid, isIos, isStandalone, promptInstall, usePwa } from '../pwa'
+import { applyUpdate, isIos, isStandalone, promptInstall, usePwa } from '../pwa'
 
 /** Плашка «Доступно обновление»: новая версия применяется только по нажатию. */
 export function UpdateToast() {
@@ -16,36 +16,28 @@ export function UpdateToast() {
 }
 
 const DISMISS_KEY = 'tm-install-banner-dismissed'
-// Данные сайта переживают удаление приложения, поэтому «скрыть» — не навсегда
-const DISMISS_FOR_MS = 14 * 24 * 3600 * 1000
 
 function readDismissed(): boolean {
   try {
-    const at = Number(localStorage.getItem(DISMISS_KEY))
-    return at > 0 && Date.now() - at < DISMISS_FOR_MS
+    return localStorage.getItem(DISMISS_KEY) === '1'
   } catch {
     return false
   }
 }
 
-const MENU_STEPS = 'Откройте меню браузера (⋮ или ≡) → «Установить приложение» или «Добавить на главный экран».'
-
 /**
- * Плашка над списком чатов. Если браузер прислал своё предложение установки
- * (beforeinstallprompt — Chrome, Edge), даём кнопку. Но присылает он его не всегда:
- * не сразу после первого захода, не после удаления приложения или отказа, а Mi Browser,
- * Samsung Internet, Firefox — вообще никогда. Тогда на Android показываем, где
- * найти установку в меню. Скрытая крестиком плашка возвращается через 14 дней.
+ * Плашка над списком чатов. Показывается, только где браузер умеет устанавливать сам
+ * (Chrome, Edge, Android): системное предложение мы перехватываем, чтобы показать своё.
+ * Скрытая крестиком больше не появляется — кнопка остаётся в настройках.
  */
 export function InstallBanner() {
-  const { canInstall, installed } = usePwa()
+  const { canInstall } = usePwa()
   const [dismissed, setDismissed] = useState(readDismissed)
-  if (dismissed || installed || isStandalone()) return null
-  if (!canInstall && !isAndroid()) return null
+  if (!canInstall || dismissed || isStandalone()) return null
   const dismiss = () => {
     setDismissed(true)
     try {
-      localStorage.setItem(DISMISS_KEY, String(Date.now()))
+      localStorage.setItem(DISMISS_KEY, '1')
     } catch {
       /* без хранилища плашка просто вернётся при следующем запуске */
     }
@@ -55,16 +47,14 @@ export function InstallBanner() {
       <img src="/icon-192.png" alt="" width={36} height={36} />
       <span>
         <b>Установите приложение</b>
-        <small>{canInstall ? 'Отдельное окно, значок и запуск без сети' : MENU_STEPS}</small>
+        <small>Отдельное окно, значок и запуск без сети</small>
       </span>
       <button className="icon" onClick={dismiss} title="Скрыть" aria-label="Скрыть">
         ×
       </button>
-      {canInstall && (
-        <button className="primary install" onClick={promptInstall}>
-          Установить
-        </button>
-      )}
+      <button className="primary install" onClick={promptInstall}>
+        Установить
+      </button>
     </div>
   )
 }
@@ -92,15 +82,13 @@ export function IosInstallHint({ hasInvite }: { hasInvite: boolean }) {
 
 /** Раздел настроек: установка и состояние хранилища. */
 export function AppSection() {
-  const { canInstall, persisted, installed } = usePwa()
+  const { canInstall, persisted } = usePwa()
   const standalone = isStandalone()
   return (
     <>
       <h3>Приложение</h3>
       {standalone ? (
         <p className="muted small">Открыто как установленное приложение.</p>
-      ) : installed ? (
-        <p className="muted small">Приложение уже установлено — его можно открыть со значка на экране.</p>
       ) : canInstall ? (
         <>
           <p className="muted small">Установите мессенджер как приложение: отдельное окно, значок и запуск без сети.</p>
@@ -111,7 +99,7 @@ export function AppSection() {
           {IOS_STEPS} Учтите: у установленного приложения своё хранилище, текущие чаты туда не перейдут.
         </p>
       ) : (
-        <p className="muted small">{MENU_STEPS}</p>
+        <p className="muted small">Установить можно из меню браузера («Установить приложение» или «Добавить на главный экран»).</p>
       )}
       {persisted !== null && (
         <p className="muted small">
