@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { CreateInviteDialog, JoinDialog } from './InviteDialogs'
 import { useLive, useMessenger } from './hooks'
 import { Modal } from './Modal'
+import { AppSection } from './PwaUi'
 import { formatTime } from './format'
 
 const STATUS_TEXT = { online: 'в сети', connecting: 'подключение…', offline: 'нет связи' } as const
@@ -76,6 +77,8 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
         Все данные хранятся только в этом браузере. На сервере — лишь зашифрованные сообщения, которые ещё не
         забрал получатель (не дольше 7 дней).
       </p>
+      <hr />
+      <AppSection />
       <hr />
       <h3>Удалить всё</h3>
       <p className="muted small">

@@ -165,3 +165,11 @@ label.button {
   display: block; margin: 0; text-align: center; color: var(--text); font-size: inherit;
   border: 1px solid var(--line); background: var(--panel-2); border-radius: 8px; padding: 8px 14px; cursor: pointer;
 }
+
+/* --- PWA --- */
+.update-toast {
+  position: fixed; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+  display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 16px; z-index: 100;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: 0 6px 24px rgb(0 0 0 / .25); max-width: calc(100% - 32px);
+}

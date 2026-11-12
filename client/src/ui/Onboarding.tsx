@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useMessenger } from './hooks'
+import { IosInstallHint } from './PwaUi'
 
 export function Onboarding({ hasInvite }: { hasInvite: boolean }) {
   const m = useMessenger()
@@ -26,6 +27,7 @@ export function Onboarding({ hasInvite }: { hasInvite: boolean }) {
           Очистка данных сайта, удаление браузера или режим инкогнито после закрытия окна — и всё исчезнет
           безвозвратно. Восстановить нельзя.
         </p>
+        <IosInstallHint hasInvite={hasInvite} />
         {hasInvite && <p className="muted">Вас пригласили в чат. Представьтесь, чтобы принять приглашение.</p>}
         <label>
           Как вас называть собеседникам

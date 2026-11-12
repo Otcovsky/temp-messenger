@@ -4,6 +4,7 @@ import { checkSupport } from '../crypto/primitives'
 import { ChatView } from './ChatView'
 import { AcceptInviteDialog } from './InviteDialogs'
 import { MessengerContext, useMessenger, useVersion } from './hooks'
+import { requestPersistence } from '../pwa'
 import { Onboarding } from './Onboarding'
 import { Sidebar } from './Sidebar'
 
@@ -94,6 +95,11 @@ function Main({ invite, clearInvite }: { invite: string | null; clearInvite: () 
   useEffect(() => {
     m.setActiveConversation(active)
   }, [m, active])
+
+  // Ключи живут только в IndexedDB — просим браузер не стирать их сам
+  useEffect(() => {
+    if (m.hasAccount) void requestPersistence().catch(() => {})
+  }, [m.hasAccount])
 
   if (!m.hasAccount) return <Onboarding hasInvite={!!invite} />
 
