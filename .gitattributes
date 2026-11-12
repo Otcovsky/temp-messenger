@@ -1,0 +1,5 @@
+# Все текстовые файлы — с LF, независимо от core.autocrlf (deploy.sh иначе ломается в bash)
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
