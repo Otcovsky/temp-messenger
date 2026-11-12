@@ -1,0 +1,61 @@
+# Temp Messenger
+
+Одноразовый мессенджер со сквозным шифрованием, который целиком живёт в браузере.
+
+- **Нет аккаунтов.** Личность — пара ключей, созданная в браузере. Очистили данные сайта — личность и переписка исчезли навсегда.
+- **Сервер ничего не знает.** Он только передаёт зашифрованные сообщения и хранит недоставленные (до 7 дней, удаляет сразу после получения). Отправителя он не видит: тот указан внутри шифротекста.
+- **Шифрование как в Signal:** обмен ключами по ссылке-приглашению (упрощённый X3DH) + Double Ratchet. Всё на Web Crypto (X25519, Ed25519, HKDF, AES-256-GCM). Если браузер не умеет X25519/Ed25519, они берутся из проверенной аудитом `@noble/curves`.
+
+## Структура
+
+```
+client/   Vite + React + TypeScript
+  src/crypto/     ключи, приглашения, Double Ratchet
+  src/protocol/   форматы сообщений
+  src/storage/    IndexedDB
+  src/transport/  WebSocket
+  src/core/       логика мессенджера
+  src/ui/         интерфейс
+server/   Python, FastAPI — ретранслятор
+deploy/   nginx, systemd, скрипт выкладки
+docs/     описание протокола
+```
+
+## Запуск для разработки
+
+Сервер (Python 3.11+):
+
+```bash
+cd server
+python -m venv .venv
+.venv/Scripts/pip install -r requirements-dev.txt   # Linux/macOS: .venv/bin/pip
+.venv/Scripts/python -m uvicorn app.main:app --port 8100
+```
+
+Клиент (Node 20+), в другом терминале:
+
+```bash
+cd client
+npm install
+npm run dev
+```
+
+Откройте http://127.0.0.1:5173. Чтобы проверить переписку с самим собой, откройте второго пользователя на
+http://localhost:5173: это другой origin, поэтому у него будет отдельное хранилище. Ссылку-приглашение вставьте
+в поле «Есть ссылка от собеседника?».
+
+Тесты:
+
+```bash
+cd server && .venv/Scripts/python -m pytest
+cd client && npm test
+```
+
+## Выкладка
+
+См. [deploy/README.md](deploy/README.md).
+
+## Что дальше
+
+Протокол заложен с расчётом на расширение (см. [docs/protocol.md](docs/protocol.md)): вложения, звонки (WebRTC),
+групповые чаты (Sender Keys), push-уведомления — это новые типы сообщений, без смены формата.

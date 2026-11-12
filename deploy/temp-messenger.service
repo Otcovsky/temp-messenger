@@ -1,0 +1,18 @@
+# Пользовательский systemd-сервис: ~/.config/systemd/user/temp-messenger.service
+# Перезапуск без sudo: systemctl --user restart temp-messenger
+# Чтобы работал без входа пользователя, один раз: sudo loginctl enable-linger otche
+[Unit]
+Description=Temp Messenger relay
+After=network.target
+
+[Service]
+WorkingDirectory=%h/temp-messenger/server
+Environment=TM_DB_PATH=%h/temp-messenger/data/relay.sqlite3
+ExecStart=%h/temp-messenger/server/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8100 --ws-max-size 131072 --no-access-log
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target
