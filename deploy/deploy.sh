@@ -30,9 +30,13 @@ tar --exclude=__pycache__ -czf - server/app server/requirements.txt deploy/temp-
   systemctl --user daemon-reload
   systemctl --user enable -q temp-messenger
   systemctl --user restart temp-messenger
-  sleep 2
+  # relay стартует несколько секунд — ждём /health до 30 с, а не фиксированную паузу
+  for i in \$(seq 30); do
+    curl -sf http://127.0.0.1:8100/health && break
+    [ \$i -eq 30 ] && { echo 'relay не ответил за 30 с'; journalctl --user -u temp-messenger -n 20 --no-pager; exit 1; }
+    sleep 1
+  done
   systemctl --user is-active temp-messenger
-  curl -sf http://127.0.0.1:8100/health
 "
 echo
 echo "==> Готово"
