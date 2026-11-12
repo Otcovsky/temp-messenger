@@ -36,6 +36,7 @@ import {
   openStore,
   saveAccount,
   wipeStore,
+  writeAll,
 } from '../storage/db'
 import { type ConnStatus, type InviteState, type ServerFrame, Transport, defaultServerUrl } from '../transport/ws'
 
@@ -43,6 +44,10 @@ const INVITE_TTL_MS = 30 * 24 * 3600 * 1000
 const MAX_TEXT = 10_000
 const MAILBOX_RE = /^[A-Za-z0-9_-]{22}$/
 const PROBE_TIMEOUT_MS = 10_000
+const REGISTER_TIMEOUT_MS = 8_000
+/** Сколько id уже обработанных входящих помнить, чтобы не разбирать повторную доставку */
+const HANDLED_MAX = 2_000
+const NO_CONNECTION = 'Нет связи с сервером. Попробуйте ещё раз, когда связь появится.'
 
 const STATUS_RANK: Record<MessageStatus, number> = {
   failed: -1, pending: 0, sent: 1, delivered: 2, read: 3, received: 0,
@@ -59,6 +64,13 @@ export class Messenger {
   private listeners = new Set<() => void>()
   private activeConv: string | null = null
   private probes = new Map<string, ((s: InviteState) => void)[]>()
+  private registerWaiters = new Map<string, (() => void)[]>()
+  /**
+   * Id входящих, уже взятых в работу. Сервер может прислать сообщение повторно (например,
+   * после перерегистрации ящика, пока ack ещё не дошёл), а повторная расшифровка уже
+   * использованным ключом храповика заканчивается ошибкой.
+   */
+  private handled = new Set<string>()
   /** Растёт при каждом изменении — UI по нему перечитывает данные */
   version = 0
 
@@ -123,6 +135,26 @@ export class Messenger {
       if (document.visibilityState === 'visible' && this.activeConv) void this.markRead(this.activeConv)
     })
     void this.dropExpiredInvites()
+    void this.repair().catch((e) => console.warn('Не удалось проверить базу', e))
+  }
+
+  /**
+   * Контакт без беседы — след прежней ошибки, когда запись прерывалась на середине.
+   * Если сессия цела, восстанавливаем беседу, иначе убираем контакт: писать ему всё равно нечем.
+   */
+  private async repair() {
+    let changed = false
+    for (const c of await this.db.getAll('contacts')) {
+      if (await this.db.get('conversations', c.id)) continue
+      if (await this.db.get('sessions', c.id)) {
+        await this.db.put('conversations', newConversation(c))
+      } else {
+        await this.db.delete('contacts', c.id)
+        this.transport?.send({ t: 'unregister', mailbox: c.myMailbox })
+      }
+      changed = true
+    }
+    if (changed) this.emit()
   }
 
   /** Удалить всё: сообщить собеседникам, закрыть ящики на сервере, стереть базу. */
@@ -150,6 +182,12 @@ export class Messenger {
   private onFrame(f: ServerFrame) {
     switch (f.t) {
       case 'msg':
+        if (this.handled.has(f.id)) {
+          this.transport?.send({ t: 'ack', mailbox: f.mailbox, ids: [f.id] })
+          break
+        }
+        this.handled.add(f.id)
+        if (this.handled.size > HANDLED_MAX) this.handled.delete(this.handled.values().next().value!)
         void this.serial(() => this.receive(f.mailbox, f.payload))
           .catch((e) => console.warn('Не удалось обработать сообщение', e))
           .finally(() => this.transport?.send({ t: 'ack', mailbox: f.mailbox, ids: [f.id] }))
@@ -157,6 +195,12 @@ export class Messenger {
       case 'sent':
         void this.onSent(f.id, f.failed)
         break
+      case 'registered': {
+        const waiting = this.registerWaiters.get(f.mailbox)
+        this.registerWaiters.delete(f.mailbox)
+        waiting?.forEach((fn) => fn())
+        break
+      }
       case 'probe': {
         const waiting = this.probes.get(f.mailbox)
         this.probes.delete(f.mailbox)
@@ -201,12 +245,48 @@ export class Messenger {
     return `${location.origin}${location.pathname}#i=${encodeInvite(inv.payload)}`
   }
 
+  /**
+   * Создать приглашение. Ссылку отдаём, только когда сервер подтвердил ящик: иначе
+   * собеседник, открыв её, услышит от сервера «такого приглашения нет».
+   */
   async createInvite(): Promise<PendingInvite> {
+    if (!(await this.waitOnline(PROBE_TIMEOUT_MS))) throw new Error(NO_CONNECTION)
     const inv = await createInviteCrypto(this.identity!, this.profile!.name)
     await this.db.put('invites', inv)
-    this.transport?.send({ t: 'register', mailbox: inv.mailbox, invite: true })
+    try {
+      await this.registerConfirmed(inv.mailbox, true)
+    } catch (e) {
+      await this.db.delete('invites', inv.mailbox)
+      throw e
+    }
     this.emit()
     return inv
+  }
+
+  /** Зарегистрировать ящик и дождаться подтверждения сервера. */
+  private registerConfirmed(mailbox: string, invite: boolean): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const forget = () => {
+        const rest = (this.registerWaiters.get(mailbox) ?? []).filter((fn) => fn !== done)
+        if (rest.length) this.registerWaiters.set(mailbox, rest)
+        else this.registerWaiters.delete(mailbox)
+      }
+      const timer = setTimeout(() => {
+        forget()
+        this.transport?.checkAlive()
+        reject(new Error('Сервер не ответил. Проверьте связь и попробуйте ещё раз.'))
+      }, REGISTER_TIMEOUT_MS)
+      const done = () => {
+        clearTimeout(timer)
+        resolve()
+      }
+      this.registerWaiters.set(mailbox, [...(this.registerWaiters.get(mailbox) ?? []), done])
+      if (!this.transport?.send({ t: 'register', mailbox, invite })) {
+        clearTimeout(timer)
+        forget()
+        reject(new Error(NO_CONNECTION))
+      }
+    })
   }
 
   listInvites(): Promise<PendingInvite[]> {
@@ -261,7 +341,7 @@ export class Messenger {
   /** Живая беседа, уже созданная по этому приглашению (если ссылку открыли повторно). */
   async existingChatForInvite(invite: InvitePayload): Promise<string | null> {
     const c = (await this.db.getAll('contacts')).find((c) => c.theirMailbox === invite.m && !c.gone)
-    return c?.id ?? null
+    return c && (await this.db.get('conversations', c.id)) ? c.id : null
   }
 
   /**
@@ -293,12 +373,10 @@ export class Messenger {
       sigPub: invite.sk,
       createdAt: Date.now(),
     }
-    const tx = this.db.transaction(['contacts', 'sessions', 'conversations'], 'readwrite')
-    await Promise.all([
+    await writeAll(this.db, ['contacts', 'sessions', 'conversations'], (tx) => [
       tx.objectStore('contacts').put(contact),
       tx.objectStore('sessions').put({ contactId: contact.id, state: session, preKey }),
       tx.objectStore('conversations').put(newConversation(contact)),
-      tx.done,
     ])
     this.transport?.send({ t: 'register', mailbox: contact.myMailbox, invite: false })
     await this.sendContent(contact, {
@@ -347,11 +425,10 @@ export class Messenger {
       if (!sess) throw new Error('Нет сессии шифрования')
       const r = await ratchetEncrypt(sess.state, encodeContent(content))
       const payload = encodePayload(r.header, r.ciphertext, sess.preKey)
-      const tx = this.db.transaction(['sessions', 'outbox'], 'readwrite')
-      await Promise.all([
+      const to = contact.theirMailbox
+      await writeAll(this.db, ['sessions', 'outbox'], (tx) => [
         tx.objectStore('sessions').put({ ...sess, state: r.state }),
-        tx.objectStore('outbox').put({ id: content.id, to: [contact.theirMailbox], payload, createdAt: Date.now(), msgId }),
-        tx.done,
+        tx.objectStore('outbox').put({ id: content.id, to: [to], payload, createdAt: Date.now(), msgId }),
       ])
     }).then(() => this.flushOutbox())
   }
@@ -389,13 +466,12 @@ export class Messenger {
         sigPub: typeof hello.body.sigPub === 'string' ? hello.body.sigPub : null,
         createdAt: Date.now(),
       }
-      const tx = this.db.transaction(['invites', 'contacts', 'sessions', 'conversations'], 'readwrite')
-      await Promise.all([
+      const created = contact
+      await writeAll(this.db, ['invites', 'contacts', 'sessions', 'conversations'], (tx) => [
         tx.objectStore('invites').delete(mailbox), // приглашение одноразовое
-        tx.objectStore('contacts').put(contact),
-        tx.objectStore('sessions').put({ contactId: contact.id, state: r.state }),
-        tx.objectStore('conversations').put(newConversation(contact)),
-        tx.done,
+        tx.objectStore('contacts').put(created),
+        tx.objectStore('sessions').put({ contactId: created.id, state: r.state }),
+        tx.objectStore('conversations').put(newConversation(created)),
       ])
       // Ящик теперь обычный: повторно открытая ссылка не создаст «мёртвый» чат
       this.transport?.send({ t: 'register', mailbox, invite: false })
@@ -482,13 +558,11 @@ export class Messenger {
       this.transport?.send({ t: 'unregister', mailbox: contact.myMailbox })
     }
     const msgs = await listMessages(this.db, convId)
-    const tx = this.db.transaction(['contacts', 'sessions', 'conversations', 'messages'], 'readwrite')
-    await Promise.all([
+    await writeAll(this.db, ['contacts', 'sessions', 'conversations', 'messages'], (tx) => [
       tx.objectStore('contacts').delete(convId),
       tx.objectStore('sessions').delete(convId),
       tx.objectStore('conversations').delete(convId),
       ...msgs.map((m) => tx.objectStore('messages').delete(m.id)),
-      tx.done,
     ])
     this.emit()
   }

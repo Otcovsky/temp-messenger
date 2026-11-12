@@ -2,7 +2,7 @@
  * Локальное хранилище в IndexedDB. Всё состояние мессенджера живёт здесь:
  * очистка данных сайта = полное и безвозвратное удаление личности и переписки.
  */
-import { type DBSchema, type IDBPDatabase, deleteDB, openDB } from 'idb'
+import { type DBSchema, type IDBPDatabase, type IDBPTransaction, type StoreNames, deleteDB, openDB } from 'idb'
 import type { Identity, PendingInvite, PreKeyHeader } from '../crypto/handshake'
 import type { KeyPair } from '../crypto/primitives'
 import type { RatchetState } from '../crypto/ratchet'
@@ -111,6 +111,33 @@ export async function wipeStore(db: DB | null): Promise<void> {
   }
 }
 
+type Stores = StoreNames<Schema>[]
+export type WriteTx<S extends Stores> = IDBPTransaction<Schema, S, 'readwrite'>
+
+/**
+ * Запись в несколько хранилищ: либо всё, либо ничего. Простое Promise.all([put…, tx.done])
+ * этого не гарантирует: если put бросает синхронно (например, DataCloneError, когда браузер
+ * не умеет сохранить ключ), уже поставленные в очередь операции молча фиксируются.
+ */
+export async function writeAll<S extends Stores>(
+  db: DB,
+  stores: S,
+  ops: (tx: WriteTx<S>) => Promise<unknown>[],
+): Promise<void> {
+  const tx = db.transaction(stores, 'readwrite')
+  tx.done.catch(() => {}) // ошибку отдаём ниже; здесь — только чтобы не было «необработанного» отказа
+  try {
+    await Promise.all([...ops(tx), tx.done])
+  } catch (e) {
+    try {
+      tx.abort()
+    } catch {
+      /* уже завершена или откатана */
+    }
+    throw e
+  }
+}
+
 // --- meta ----------------------------------------------------------------
 
 export const getIdentity = (db: DB) => db.get('meta', 'identity') as Promise<Identity | undefined>
@@ -118,13 +145,10 @@ export const getAuthKey = (db: DB) => db.get('meta', 'auth') as Promise<KeyPair 
 export const getProfile = (db: DB) => db.get('meta', 'profile') as Promise<Profile | undefined>
 
 export async function saveAccount(db: DB, identity: Identity, auth: KeyPair, profile: Profile): Promise<void> {
-  const tx = db.transaction('meta', 'readwrite')
-  await Promise.all([
-    tx.store.put(identity, 'identity'),
-    tx.store.put(auth, 'auth'),
-    tx.store.put(profile, 'profile'),
-    tx.done,
-  ])
+  await writeAll(db, ['meta'], (tx) => {
+    const meta = tx.objectStore('meta')
+    return [meta.put(identity, 'identity'), meta.put(auth, 'auth'), meta.put(profile, 'profile')]
+  })
 }
 
 /** Все мои ящики: незакрытые приглашения + ящики контактов. */

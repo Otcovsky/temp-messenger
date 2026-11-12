@@ -10,11 +10,32 @@ export function CreateInviteDialog({ onClose }: { onClose: () => void }) {
   const [invite, setInvite] = useState<PendingInvite | null>(null)
   const [qr, setQr] = useState<string>('')
   const [copied, setCopied] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
   const pending = useLive((m) => m.listInvites(), [])
+
+  const create = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      setInvite(await m.createInvite())
+    } catch (e) {
+      console.error('Не удалось создать приглашение', e)
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
   const link = invite ? m.inviteLink(invite) : ''
 
   useEffect(() => {
-    if (link) QRCode.toDataURL(link, { margin: 1, width: 260, errorCorrectionLevel: 'M' }).then(setQr)
+    if (link)
+      QRCode.toDataURL(link, { margin: 1, width: 260, errorCorrectionLevel: 'M' })
+        .then(setQr)
+        .catch((e) => {
+          console.error('Не удалось нарисовать QR-код', e)
+          setError(`QR-код не получился (${e instanceof Error ? e.message : e}). Ссылку можно скопировать.`)
+        })
   }, [link])
 
   const copy = async () => {
@@ -31,13 +52,15 @@ export function CreateInviteDialog({ onClose }: { onClose: () => void }) {
             Создайте ссылку и передайте её собеседнику любым способом: лично (QR-код), в другом мессенджере, по почте.
             Ссылка одноразовая — по ней можно добавить только одного человека.
           </p>
-          <button className="primary" onClick={async () => setInvite(await m.createInvite())}>
-            Создать ссылку
+          <button className="primary" onClick={create} disabled={busy}>
+            {busy ? 'Создаю…' : 'Создать ссылку'}
           </button>
+          {error && <p className="error">{error}</p>}
         </>
       ) : (
         <div className="invite">
           {qr && <img className="qr" src={qr} alt="QR-код приглашения" width={260} height={260} />}
+          {error && <p className="error">{error}</p>}
           <div className="link-row">
             <input readOnly value={link} onFocus={(e) => e.target.select()} />
             <button onClick={copy}>{copied ? 'Скопировано' : 'Копировать'}</button>

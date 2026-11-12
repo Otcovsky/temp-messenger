@@ -29,6 +29,8 @@ export interface TransportHandlers {
 
 const AUTH_CONTEXT = utf8('tm-auth-v1:')
 const PING_MS = 25_000
+/** Сколько ждать ответа на проверочный пинг, прежде чем считать соединение мёртвым */
+const ALIVE_TIMEOUT_MS = 5_000
 
 export function defaultServerUrl(): string {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -42,6 +44,9 @@ export class Transport {
   private attempt = 0
   private pingTimer: ReturnType<typeof setInterval> | undefined
   private retryTimer: ReturnType<typeof setTimeout> | undefined
+  private aliveTimer: ReturnType<typeof setTimeout> | undefined
+  /** Когда от сервера последний раз что-то приходило */
+  private lastFrameAt = 0
   status: ConnStatus = 'offline'
 
   constructor(
@@ -62,6 +67,7 @@ export class Transport {
     window.removeEventListener('online', this.kick)
     document.removeEventListener('visibilitychange', this.kick)
     clearTimeout(this.retryTimer)
+    clearTimeout(this.aliveTimer)
     this.ws?.close()
   }
 
@@ -75,13 +81,56 @@ export class Transport {
     return true
   }
 
-  /** Сеть появилась или вкладка снова видима — переподключиться сразу, без ожидания. */
+  /**
+   * Сеть появилась или вкладка снова видима — переподключиться сразу, без ожидания.
+   * Если соединение формально открыто, проверяем, живо ли оно: iOS, усыпив приложение
+   * в фоне, оставляет «зомби»-сокет, в который send() уходит в никуда, а close приходит
+   * лишь через минуты.
+   */
   private kick = () => {
-    if (!this.stopped && !this.ws && document.visibilityState === 'visible') {
+    if (this.stopped || document.visibilityState !== 'visible') return
+    if (!this.ws) {
       clearTimeout(this.retryTimer)
       this.attempt = 0
       this.connect()
+    } else if (this.ready) {
+      this.checkAlive()
     }
+  }
+
+  /** Отправить пинг и, если сервер не ответит, переподключиться. */
+  checkAlive(): void {
+    if (!this.ws || !this.ready || this.aliveTimer) return
+    const since = Date.now()
+    this.send({ t: 'ping' })
+    this.aliveTimer = setTimeout(() => {
+      this.aliveTimer = undefined
+      if (this.lastFrameAt < since) this.drop()
+    }, ALIVE_TIMEOUT_MS)
+  }
+
+  /** Бросить текущее соединение, не дожидаясь close от браузера, и сразу открыть новое. */
+  private drop() {
+    const ws = this.ws
+    if (!ws) return
+    ws.onmessage = ws.onclose = ws.onerror = null
+    try {
+      ws.close()
+    } catch {
+      /* уже закрыт */
+    }
+    this.closed(0)
+  }
+
+  private closed(delay: number) {
+    clearInterval(this.pingTimer)
+    clearTimeout(this.aliveTimer)
+    this.aliveTimer = undefined
+    this.ws = null
+    this.ready = false
+    this.setStatus('offline')
+    if (this.stopped) return
+    this.retryTimer = setTimeout(() => this.connect(), delay)
   }
 
   private setStatus(s: ConnStatus) {
@@ -96,6 +145,7 @@ export class Transport {
     this.ws = ws
 
     ws.onmessage = async (ev) => {
+      this.lastFrameAt = Date.now()
       let f: ServerFrame
       try {
         f = JSON.parse(ev.data)
@@ -109,7 +159,7 @@ export class Transport {
         this.ready = true
         this.attempt = 0
         this.setStatus('online')
-        this.pingTimer = setInterval(() => this.send({ t: 'ping' }), PING_MS)
+        this.pingTimer = setInterval(() => this.checkAlive(), PING_MS)
         this.h.onReady()
       } else {
         this.h.onFrame(f)
@@ -117,14 +167,9 @@ export class Transport {
     }
 
     ws.onclose = () => {
-      clearInterval(this.pingTimer)
-      this.ws = null
-      this.ready = false
-      this.setStatus('offline')
-      if (this.stopped) return
       const delay = Math.min(30_000, 1000 * 2 ** this.attempt) * (0.75 + Math.random() * 0.5)
       this.attempt++
-      this.retryTimer = setTimeout(() => this.connect(), delay)
+      this.closed(delay)
     }
     ws.onerror = () => ws.close()
   }

@@ -32,26 +32,51 @@ const u8 = (b: Uint8Array): Bytes => new Uint8Array(b) as Bytes
 const native = { x25519: false, ed25519: false }
 let detected: Promise<void> | null = null
 
+/**
+ * Сохранить ключ в IndexedDB и прочитать обратно. Создать ключ браузер может, а сохранить —
+ * не всегда (structured clone для CryptoKey X25519/Ed25519 поддержан не везде), и тогда
+ * запись приглашения или сессии падала бы уже посреди работы.
+ */
+async function roundTrip(key: CryptoKey): Promise<CryptoKey> {
+  if (typeof indexedDB === 'undefined') return key // тесты в Node
+  const req = (r: IDBRequest) =>
+    new Promise<unknown>((resolve, reject) => {
+      r.onsuccess = () => resolve(r.result)
+      r.onerror = () => reject(r.error)
+    })
+  const open = indexedDB.open('tm-key-probe', 1)
+  open.onupgradeneeded = () => open.result.createObjectStore('k')
+  const db = (await req(open)) as IDBDatabase
+  try {
+    await req(db.transaction('k', 'readwrite').objectStore('k').put(key, 'k'))
+    const back = (await req(db.transaction('k').objectStore('k').get('k'))) as CryptoKey
+    if (!(back instanceof CryptoKey)) throw new Error('ключ не сохранился')
+    return back
+  } finally {
+    db.close()
+  }
+}
+
 function detectNative(): Promise<void> {
   detected ??= (async () => {
     try {
       const a = (await subtle.generateKey(X25519, false, ['deriveBits'])) as CryptoKeyPair
       const b = (await subtle.generateKey(X25519, true, ['deriveBits'])) as CryptoKeyPair
       const pub = await subtle.importKey('raw', await subtle.exportKey('raw', b.publicKey), X25519, true, [])
-      await subtle.deriveBits({ name: 'X25519', public: pub }, a.privateKey, 256)
+      await subtle.deriveBits({ name: 'X25519', public: pub }, await roundTrip(a.privateKey), 256)
       native.x25519 = true
-    } catch {
-      /* нет X25519 */
+    } catch (e) {
+      console.info('X25519 из Web Crypto недоступен, используется JS-реализация', e)
     }
     try {
       const kp = (await subtle.generateKey(ED25519, false, ['sign', 'verify'])) as CryptoKeyPair
       const data = new Uint8Array(1)
-      const sig = await subtle.sign(ED25519, kp.privateKey, data)
+      const sig = await subtle.sign(ED25519, await roundTrip(kp.privateKey), data)
       const pub = await subtle.importKey('raw', await subtle.exportKey('raw', kp.publicKey), ED25519, true, ['verify'])
       if (!(await subtle.verify(ED25519, pub, sig, data))) throw new Error()
       native.ed25519 = true
-    } catch {
-      /* нет Ed25519 */
+    } catch (e) {
+      console.info('Ed25519 из Web Crypto недоступен, используется JS-реализация', e)
     }
   })()
   return detected
