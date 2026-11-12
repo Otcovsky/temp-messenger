@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { CreateInviteDialog, JoinDialog } from './InviteDialogs'
 import { useLive, useMessenger } from './hooks'
 import { Modal } from './Modal'
-import { AppSection } from './PwaUi'
+import { AppSection, InstallBanner } from './PwaUi'
 import { formatTime } from './format'
 
 const STATUS_TEXT = { online: 'в сети', connecting: 'подключение…', offline: 'нет связи' } as const
@@ -31,6 +31,7 @@ export function Sidebar({ active, onSelect }: { active: string | null; onSelect:
         </button>
         <button onClick={() => setJoining(true)}>Присоединиться</button>
       </div>
+      <InstallBanner />
 
       <ul className="conv-list">
         {conversations?.length === 0 && <li className="muted empty-hint">Пока нет чатов</li>}

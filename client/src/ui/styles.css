@@ -173,3 +173,12 @@ label.button {
   background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
   box-shadow: 0 6px 24px rgb(0 0 0 / .25); max-width: calc(100% - 32px);
 }
+.install-banner {
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; margin: 10px 10px 0; padding: 10px;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.install-banner img { border-radius: 8px; flex: none; }
+.install-banner > span { display: grid; min-width: 0; font-size: 14px; }
+.install-banner button.install { grid-column: 1 / -1; }
+.install-banner small { color: var(--muted); font-size: 12px; }
+.install-banner button.icon { padding: 4px 6px; color: var(--muted); align-self: start; }

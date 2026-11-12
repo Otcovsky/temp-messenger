@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { applyUpdate, isIos, isStandalone, promptInstall, usePwa } from '../pwa'
 
 /** Плашка «Доступно обновление»: новая версия применяется только по нажатию. */
@@ -9,6 +10,50 @@ export function UpdateToast() {
       <span>Доступна новая версия</span>
       <button className="primary" onClick={applyUpdate}>
         Обновить
+      </button>
+    </div>
+  )
+}
+
+const DISMISS_KEY = 'tm-install-banner-dismissed'
+
+function readDismissed(): boolean {
+  try {
+    return localStorage.getItem(DISMISS_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Плашка над списком чатов. Показывается, только где браузер умеет устанавливать сам
+ * (Chrome, Edge, Android): системное предложение мы перехватываем, чтобы показать своё.
+ * Скрытая крестиком больше не появляется — кнопка остаётся в настройках.
+ */
+export function InstallBanner() {
+  const { canInstall } = usePwa()
+  const [dismissed, setDismissed] = useState(readDismissed)
+  if (!canInstall || dismissed || isStandalone()) return null
+  const dismiss = () => {
+    setDismissed(true)
+    try {
+      localStorage.setItem(DISMISS_KEY, '1')
+    } catch {
+      /* без хранилища плашка просто вернётся при следующем запуске */
+    }
+  }
+  return (
+    <div className="install-banner">
+      <img src="/icon-192.png" alt="" width={36} height={36} />
+      <span>
+        <b>Установите приложение</b>
+        <small>Отдельное окно, значок и запуск без сети</small>
+      </span>
+      <button className="icon" onClick={dismiss} title="Скрыть" aria-label="Скрыть">
+        ×
+      </button>
+      <button className="primary install" onClick={promptInstall}>
+        Установить
       </button>
     </div>
   )
