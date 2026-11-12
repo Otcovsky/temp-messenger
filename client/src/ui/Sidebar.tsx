@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { CreateInviteDialog } from './InviteDialogs'
+import { CreateInviteDialog, JoinDialog } from './InviteDialogs'
 import { useLive, useMessenger } from './hooks'
 import { Modal } from './Modal'
 import { formatTime } from './format'
@@ -10,6 +10,7 @@ export function Sidebar({ active, onSelect }: { active: string | null; onSelect:
   const m = useMessenger()
   const conversations = useLive((m) => m.conversations(), [])
   const [inviting, setInviting] = useState(false)
+  const [joining, setJoining] = useState(false)
   const [settings, setSettings] = useState(false)
 
   return (
@@ -22,10 +23,13 @@ export function Sidebar({ active, onSelect }: { active: string | null; onSelect:
             <small className={`conn ${m.status}`}>{STATUS_TEXT[m.status]}</small>
           </span>
         </button>
+      </header>
+      <div className="sidebar-actions">
         <button className="primary" onClick={() => setInviting(true)}>
           + Пригласить
         </button>
-      </header>
+        <button onClick={() => setJoining(true)}>Присоединиться</button>
+      </div>
 
       <ul className="conv-list">
         {conversations?.length === 0 && <li className="muted empty-hint">Пока нет чатов</li>}
@@ -49,6 +53,7 @@ export function Sidebar({ active, onSelect }: { active: string | null; onSelect:
       </ul>
 
       {inviting && <CreateInviteDialog onClose={() => setInviting(false)} />}
+      {joining && <JoinDialog onClose={() => setJoining(false)} />}
       {settings && <SettingsDialog onClose={() => setSettings(false)} />}
     </aside>
   )

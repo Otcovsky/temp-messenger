@@ -80,7 +80,8 @@ label input { color: var(--text); }
 /* --- раскладка --- */
 .app { height: 100%; display: grid; grid-template-columns: 320px 1fr; }
 .sidebar { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
-.sidebar-head { display: flex; align-items: center; gap: 8px; padding: 10px; border-bottom: 1px solid var(--line); }
+.sidebar-head { display: flex; align-items: center; gap: 8px; padding: 10px 10px 0; }
+.sidebar-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px; border-bottom: 1px solid var(--line); }
 .me { flex: 1; display: flex; align-items: center; gap: 10px; border: 0; background: none; padding: 4px; text-align: left; min-width: 0; }
 .me > span { display: grid; min-width: 0; }
 .me b { overflow: hidden; text-overflow: ellipsis; }

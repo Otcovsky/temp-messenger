@@ -10,9 +10,6 @@ export function CreateInviteDialog({ onClose }: { onClose: () => void }) {
   const [invite, setInvite] = useState<PendingInvite | null>(null)
   const [qr, setQr] = useState<string>('')
   const [copied, setCopied] = useState(false)
-  const [pasted, setPasted] = useState('')
-  const [pasteError, setPasteError] = useState('')
-  const [scanning, setScanning] = useState(false)
   const pending = useLive((m) => m.listInvites(), [])
   const link = invite ? m.inviteLink(invite) : ''
 
@@ -24,30 +21,6 @@ export function CreateInviteDialog({ onClose }: { onClose: () => void }) {
     await navigator.clipboard.writeText(link)
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
-  }
-
-  const openCode = (text: string) => {
-    const match = text.match(/#i=([A-Za-z0-9_-]+)/)
-    const code = match ? match[1] : text.trim()
-    try {
-      decodeInvite(code)
-      location.hash = `i=${code}` // App подхватит через hashchange
-      onClose()
-    } catch {
-      setPasteError('Это не похоже на ссылку-приглашение')
-    }
-  }
-
-  if (scanning) {
-    return (
-      <QrScanner
-        onClose={() => setScanning(false)}
-        onResult={(text) => {
-          setScanning(false)
-          openCode(text)
-        }}
-      />
-    )
   }
 
   return (
@@ -76,26 +49,6 @@ export function CreateInviteDialog({ onClose }: { onClose: () => void }) {
         </div>
       )}
 
-      <hr />
-      <h3>Есть ссылка от собеседника?</h3>
-      <div className="link-row">
-        <input
-          value={pasted}
-          onChange={(e) => {
-            setPasted(e.target.value)
-            setPasteError('')
-          }}
-          placeholder="Вставьте ссылку-приглашение"
-        />
-        <button onClick={() => openCode(pasted)} disabled={!pasted.trim()}>
-          Открыть
-        </button>
-      </div>
-      <button className="scan-button" onClick={() => setScanning(true)}>
-        Сканировать QR-код
-      </button>
-      {pasteError && <p className="error">{pasteError}</p>}
-
       {!!pending?.length && (
         <>
           <hr />
@@ -112,6 +65,67 @@ export function CreateInviteDialog({ onClose }: { onClose: () => void }) {
           </ul>
         </>
       )}
+    </Modal>
+  )
+}
+
+/** Подключиться по чужому приглашению: вставить ссылку или отсканировать QR-код. */
+export function JoinDialog({ onClose }: { onClose: () => void }) {
+  const [pasted, setPasted] = useState('')
+  const [pasteError, setPasteError] = useState('')
+  const [scanning, setScanning] = useState(false)
+
+  const openCode = (text: string) => {
+    const match = text.match(/#i=([A-Za-z0-9_-]+)/)
+    const code = match ? match[1] : text.trim()
+    try {
+      decodeInvite(code)
+      location.hash = `i=${code}` // App подхватит через hashchange
+      onClose()
+    } catch {
+      setPasteError('Это не похоже на ссылку-приглашение')
+    }
+  }
+
+  if (scanning) {
+    return (
+      <QrScanner
+        onClose={() => setScanning(false)}
+        onResult={(text) => {
+          setScanning(false)
+          openCode(text)
+        }}
+      />
+    )
+  }
+
+  return (
+    <Modal title="Присоединиться к чату" onClose={onClose}>
+      <p className="muted">Откройте ссылку-приглашение, которую вам прислал собеседник, или отсканируйте его QR-код.</p>
+      <form
+        className="link-row"
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (pasted.trim()) openCode(pasted)
+        }}
+      >
+        <input
+          autoFocus
+          value={pasted}
+          onChange={(e) => {
+            setPasted(e.target.value)
+            setPasteError('')
+          }}
+          placeholder="Вставьте ссылку-приглашение"
+        />
+        <button type="submit" disabled={!pasted.trim()}>
+          Открыть
+        </button>
+      </form>
+      <button className="scan-button" onClick={() => setScanning(true)}>
+        Сканировать QR-код
+      </button>
+      {pasteError && <p className="error">{pasteError}</p>}
     </Modal>
   )
 }
