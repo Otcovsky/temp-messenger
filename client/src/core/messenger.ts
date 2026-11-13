@@ -546,6 +546,17 @@ export class Messenger {
     await this.download(msgId)
   }
 
+  /**
+   * Запомнить размер картинки, чтобы при следующем открытии чата сразу занять под неё место.
+   * Без emit: показанный пузырь размер уже знает, а перечитывать ради этого весь чат незачем.
+   */
+  async rememberImageSize(msgId: string, w: number, h: number): Promise<void> {
+    const tx = this.db.transaction('messages', 'readwrite')
+    const msg = await tx.store.get(msgId)
+    if (msg?.file && !(msg.file.w && msg.file.h)) await tx.store.put({ ...msg, file: { ...msg.file, w, h } })
+    await tx.done
+  }
+
   /** Содержимое файла из сообщения, если оно уже есть в базе. */
   async fileData(msgId: string): Promise<ArrayBuffer | undefined> {
     return (await this.db.get('files', msgId))?.data
