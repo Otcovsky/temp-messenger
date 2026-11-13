@@ -1,3 +1,4 @@
+import { Download, FileText, Loader2, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { Messenger } from '../core/messenger'
 import type { Message } from '../storage/db'
@@ -10,6 +11,11 @@ import { Modal } from './Modal'
  * и открытый как страница он выполнился бы от имени приложения.
  */
 const INLINE_IMAGE = /^image\/(png|jpeg|gif|webp|avif|bmp)$/
+
+/** Файл показывается картинкой прямо в ленте (тогда время рисуется поверх неё). */
+export const isInlineImage = (msg: Message) => msg.file?.state === 'ready' && INLINE_IMAGE.test(msg.file.mime)
+
+export const isInlineMime = (mime: string) => INLINE_IMAGE.test(mime)
 
 /** Адрес blob: для показа файла из базы. Освобождается, когда компонент уходит с экрана. */
 function useFileUrl(msgId: string, enabled: boolean, mime: string): string | null {
@@ -47,61 +53,125 @@ async function saveFile(m: Messenger, msg: Message) {
   setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }
 
+function ImageViewer({ msg, url, onClose }: { msg: Message; url: string; onClose: () => void }) {
+  const m = useMessenger()
+  return (
+    <Modal title={msg.file!.name} onClose={onClose} wide>
+      <img className="mx-auto mb-4 block max-h-[65dvh] max-w-full rounded-2xl" src={url} alt={msg.file!.name} />
+      <button className="btn btn-primary w-full" onClick={() => void saveFile(m, msg)}>
+        <Download className="size-5" /> Сохранить
+      </button>
+    </Modal>
+  )
+}
+
+/** Одиночный файл в ленте: картинка целиком или карточка с именем и размером. */
 export function FileMessage({ msg, onMediaLoad }: { msg: Message; onMediaLoad: () => void }) {
+  const file = msg.file!
+  const imageUrl = useFileUrl(msg.id, file.state === 'ready' && isInlineMime(file.mime), file.mime)
+  const [viewing, setViewing] = useState(false)
+
+  if (!imageUrl) return <FileCard msg={msg} />
+  return (
+    <>
+      <button
+        className="block overflow-hidden rounded-[18px] transition active:scale-[0.98]"
+        onClick={() => setViewing(true)}
+        aria-label={`Открыть ${file.name}`}
+      >
+        <img
+          className="block max-h-80 max-w-[min(320px,70vw)] object-contain"
+          src={imageUrl}
+          alt={file.name}
+          onLoad={onMediaLoad}
+        />
+      </button>
+      {viewing && <ImageViewer msg={msg} url={imageUrl} onClose={() => setViewing(false)} />}
+    </>
+  )
+}
+
+/** Картинка в сетке альбома: квадрат с обрезкой; пока файл не готов — крутилка. */
+export function MediaTile({ msg, onMediaLoad, className = '' }: { msg: Message; onMediaLoad: () => void; className?: string }) {
+  const file = msg.file!
+  const url = useFileUrl(msg.id, file.state === 'ready', file.mime)
+  const [viewing, setViewing] = useState(false)
+  const busy = !url || file.state === 'loading' || msg.transfer === 'up'
+  return (
+    <>
+      <button
+        className={`relative block overflow-hidden bg-slate-900/10 transition active:brightness-90 dark:bg-white/8 ${className}`}
+        disabled={!url}
+        onClick={() => setViewing(true)}
+        aria-label={`Открыть ${file.name}`}
+      >
+        {url && <img className="size-full object-cover" src={url} alt={file.name} onLoad={onMediaLoad} />}
+        {busy && (
+          <span className="absolute inset-0 grid place-items-center bg-black/15">
+            <Loader2 className="size-6 animate-spin text-white drop-shadow" />
+          </span>
+        )}
+      </button>
+      {viewing && url && <ImageViewer msg={msg} url={url} onClose={() => setViewing(false)} />}
+    </>
+  )
+}
+
+/** Карточка файла: значок-кнопка «сохранить», имя и состояние передачи. */
+export function FileCard({ msg }: { msg: Message }) {
   const m = useMessenger()
   const file = msg.file!
   const ready = file.state === 'ready'
-  const isImage = INLINE_IMAGE.test(file.mime)
-  const imageUrl = useFileUrl(msg.id, ready && isImage, file.mime)
-  const [viewing, setViewing] = useState(false)
-
-  if (imageUrl) {
-    return (
-      <>
-        <button className="file-image" onClick={() => setViewing(true)} aria-label={`Открыть ${file.name}`}>
-          <img src={imageUrl} alt={file.name} onLoad={onMediaLoad} />
-        </button>
-        {viewing && (
-          <Modal title={file.name} onClose={() => setViewing(false)}>
-            <img className="file-view" src={imageUrl} alt={file.name} />
-            <div className="actions">
-              <button className="primary" onClick={() => void saveFile(m, msg)}>
-                Сохранить
-              </button>
-            </div>
-          </Modal>
-        )}
-      </>
-    )
-  }
-
   const mine = msg.from === 'me'
+  const busy = file.state === 'loading' || msg.transfer === 'up'
+  const bad = file.state === 'gone' || file.state === 'error'
   let status: React.ReactNode
   if (mine && msg.transfer === 'up') status = 'отправляется…'
   else if (file.state === 'loading') status = 'скачивается…'
   else if (file.state === 'gone') status = 'файл больше недоступен'
   else if (file.state === 'error')
     status = (
-      <button className="link danger" onClick={() => void m.retryDownload(msg.id)}>
+      <button className="font-semibold underline underline-offset-2" onClick={() => void m.retryDownload(msg.id)}>
         не скачался — повторить
       </button>
     )
   else status = formatSize(file.size)
 
+  const iconBox = mine
+    ? 'bg-white/20 text-white'
+    : ready
+      ? 'bg-brand text-white shadow-md shadow-violet-500/30'
+      : 'bg-slate-900/5 text-slate-500 dark:bg-white/8 dark:text-slate-400'
+
   return (
-    <div className="file-card">
-      <button className="file-icon" disabled={!ready} onClick={() => void saveFile(m, msg)} aria-label={`Сохранить ${file.name}`}>
-        {ready ? '⤓' : file.state === 'loading' || msg.transfer === 'up' ? '…' : '✕'}
+    <div className="flex min-w-0 items-center gap-3 py-1 pr-2 pl-1">
+      <button
+        className={`relative grid size-11 shrink-0 place-items-center rounded-2xl transition active:scale-90 ${iconBox}`}
+        disabled={!ready}
+        onClick={() => void saveFile(m, msg)}
+        aria-label={`Сохранить ${file.name}`}
+      >
+        {ready && !busy ? (
+          <Download className="size-5" />
+        ) : busy ? (
+          <Loader2 className="size-5 animate-spin" />
+        ) : bad ? (
+          <X className="size-5" />
+        ) : (
+          <FileText className="size-5" />
+        )}
       </button>
-      <span className="file-info">
+      <span className="flex min-w-0 flex-col">
         {ready ? (
-          <button className="link file-name" onClick={() => void saveFile(m, msg)}>
+          <button className="truncate text-left font-semibold hover:underline" onClick={() => void saveFile(m, msg)}>
             {file.name}
           </button>
         ) : (
-          <b className="file-name">{file.name}</b>
+          <b className="truncate font-semibold">{file.name}</b>
         )}
-        <small className={file.state === 'gone' || file.state === 'error' ? 'error' : 'muted'}>
+        <small
+          className={`text-xs ${bad ? (mine ? 'text-rose-100' : 'text-rose-500') : mine ? 'text-white/75' : 'muted'}`}
+        >
           {status}
           {file.state !== 'ready' && file.state !== 'gone' && ` · ${formatSize(file.size)}`}
         </small>

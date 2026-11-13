@@ -3,6 +3,7 @@ import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { type Plugin, type ResolvedConfig, defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
 
 /**
  * Собирает dist/sw.js из шаблона sw.js: список всех файлов сборки (кроме карт исходников)
@@ -46,7 +47,7 @@ function serviceWorker(): Plugin {
 
 // В разработке WebSocket и файлы проксируются на локальный Python-сервер.
 export default defineConfig({
-  plugins: [react(), serviceWorker()],
+  plugins: [react(), tailwindcss(), serviceWorker()],
   server: {
     port: 5173,
     proxy: {

@@ -3,6 +3,7 @@
  * иначе библиотекой jsQR (грузится только при открытии сканера).
  * Если камеры нет или доступ запрещён — можно выбрать фото с QR-кодом.
  */
+import { Camera, ImageUp, Loader2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Modal } from './Modal'
 
@@ -142,19 +143,36 @@ export function QrScanner({ onResult, onClose }: { onResult: (text: string) => v
     }
   }
 
+  const corner = 'absolute size-9 border-white'
   return (
     <Modal title="Сканировать QR-код" onClose={onClose}>
-      <div className="scanner">
+      <div className="grid gap-4">
         {!error && (
-          <div className="scanner-view">
-            <video ref={video} playsInline muted />
-            <div className="scanner-frame" aria-hidden="true" />
-            {starting && <p className="scanner-hint">Включаю камеру…</p>}
+          <div className="relative aspect-square overflow-hidden rounded-3xl bg-black">
+            <video ref={video} className="block size-full object-cover" playsInline muted />
+            <div className="scanner-frame absolute inset-[16%] rounded-3xl" aria-hidden="true">
+              <span className={`${corner} top-0 left-0 rounded-tl-3xl border-t-4 border-l-4`} />
+              <span className={`${corner} top-0 right-0 rounded-tr-3xl border-t-4 border-r-4`} />
+              <span className={`${corner} bottom-0 left-0 rounded-bl-3xl border-b-4 border-l-4`} />
+              <span className={`${corner} right-0 bottom-0 rounded-br-3xl border-r-4 border-b-4`} />
+            </div>
+            {starting && (
+              <p className="absolute inset-0 flex items-center justify-center gap-2 text-white">
+                <Loader2 className="size-5 animate-spin" /> Включаю камеру…
+              </p>
+            )}
           </div>
         )}
-        {error ? <p className="error">{error}</p> : <p className="muted small">Наведите камеру на QR-код приглашения.</p>}
-        <label className="button">
-          Сфотографировать или выбрать фото
+        {error ? (
+          <p className="note note-warn">
+            <Camera className="mt-0.5 size-5 shrink-0" />
+            <span>{error}</span>
+          </p>
+        ) : (
+          <p className="muted text-center text-sm">Наведите камеру на QR-код приглашения</p>
+        )}
+        <label role="button" className={`btn w-full ${error ? 'btn-primary' : 'btn-soft'}`}>
+          <ImageUp className="size-5" /> Сфотографировать или выбрать фото
           <input type="file" accept="image/*" hidden onChange={(e) => void fromFile(e.target.files?.[0])} />
         </label>
       </div>

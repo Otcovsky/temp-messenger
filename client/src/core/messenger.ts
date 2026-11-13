@@ -55,6 +55,8 @@ const MAILBOX_RE = /^[A-Za-z0-9_-]{22}$/
 export const MAX_FILE = 25 * 1024 * 1024
 const BLOB_ID_RE = MAILBOX_RE
 const FILE_KEY_RE = /^[A-Za-z0-9_-]{43}$/
+/** id из 16 случайных байт в base64url (randomId) */
+const ID_RE = /^[A-Za-z0-9_-]{22}$/
 /** Через сколько повторить передачу файла после сбоя связи, если соединение с сервером живо */
 const TRANSFER_RETRY_MS = 20_000
 const PROBE_TIMEOUT_MS = 10_000
@@ -462,29 +464,62 @@ export class Messenger {
     }
   }
 
+  /** Отправить один файл, при желании с подписью. См. sendFiles. */
+  sendFile(convId: string, file: File, caption = ''): Promise<void> {
+    return this.sendFiles(convId, [file], caption)
+  }
+
   /**
-   * Отправить файл. Он шифруется своим ключом и загружается на сервер, собеседнику уходит
-   * сообщение с id файла и ключом. Бросает, если файл не подходит или сервер его не принял;
-   * без связи сообщение ждёт отправки, как обычное.
+   * Отправить файлы одной пачкой. Каждый шифруется своим ключом и загружается на сервер,
+   * собеседнику уходит по сообщению на файл с id, ключом и общей меткой альбома (если файлов
+   * больше одного). Подпись — у последнего файла: клиент, не знающий альбомов, покажет её под пачкой.
+   * Бросает, если какой-то файл не подходит (тогда не отправляется ничего) или сервер не принял
+   * файл; без связи сообщения ждут отправки, как обычные.
    */
-  async sendFile(convId: string, file: File): Promise<void> {
-    const name = cleanFileName(file.name)
-    if (file.size > MAX_FILE) throw new Error(`«${name}» больше ${MAX_FILE / 1024 / 1024} МБ, такие файлы отправить нельзя.`)
-    if (!file.size) throw new Error(`«${name}» — пустой файл.`)
+  async sendFiles(convId: string, files: File[], caption = ''): Promise<void> {
+    if (!files.length) return
+    for (const file of files) {
+      const name = cleanFileName(file.name)
+      if (file.size > MAX_FILE) throw new Error(`«${name}» больше ${MAX_FILE / 1024 / 1024} МБ, такие файлы отправить нельзя.`)
+      if (!file.size) throw new Error(`«${name}» — пустой файл.`)
+    }
     const { conv, contact } = await this.directChat(convId)
     if (!contact.theirMailbox || contact.gone) throw new Error('Собеседнику больше нельзя писать')
-    const data = await file.arrayBuffer()
-    const msg: Message = {
-      id: randomId(), conv: convId, from: 'me', ts: Date.now(), type: 'file', text: '', status: 'pending', transfer: 'up',
-      file: { name, mime: cleanMime(file.type), size: data.byteLength, blob: randomId(), key: b64e(newFileKey()), state: 'ready' },
+    const text = caption.trim().slice(0, MAX_TEXT)
+    const album = files.length > 1 ? randomId() : undefined
+    const now = Date.now()
+    const batch: { msg: Message; data: ArrayBuffer }[] = []
+    for (const [i, file] of files.entries()) {
+      const data = await file.arrayBuffer()
+      const last = i === files.length - 1
+      const msg: Message = {
+        // Время с шагом в 1 мс: порядок файлов в пачке сохраняется и у получателя
+        id: randomId(), conv: convId, from: 'me', ts: now + i, type: 'file', text: last ? text : '',
+        status: 'pending', transfer: 'up', ...(album ? { album } : {}),
+        file: {
+          name: cleanFileName(file.name), mime: cleanMime(file.type), size: data.byteLength,
+          blob: randomId(), key: b64e(newFileKey()), state: 'ready',
+        },
+      }
+      batch.push({ msg, data })
     }
+    const lastMsg = batch[batch.length - 1].msg
+    // Вся пачка появляется в чате сразу, загрузка идёт следом
     await writeAll(this.db, ['messages', 'files', 'conversations'], (tx) => [
-      tx.objectStore('messages').put(msg),
-      tx.objectStore('files').put({ id: msg.id, data }),
-      tx.objectStore('conversations').put({ ...conv, lastTs: msg.ts, lastText: fileLabel(name) }),
+      ...batch.map(({ msg }) => tx.objectStore('messages').put(msg)),
+      ...batch.map(({ msg, data }) => tx.objectStore('files').put({ id: msg.id, data })),
+      tx.objectStore('conversations').put({ ...conv, lastTs: lastMsg.ts, lastText: fileLabel(lastMsg.file!.name, text) }),
     ])
     this.emit()
-    await this.upload(msg.id)
+    let failure: unknown
+    for (const { msg } of batch) {
+      try {
+        await this.upload(msg.id)
+      } catch (e) {
+        failure ??= e // остальные файлы пачки всё равно пробуем отправить
+      }
+    }
+    if (failure) throw failure
   }
 
   /** Повторить отправку сообщения, которое не дошло до сервера. */
@@ -551,7 +586,12 @@ export class Messenger {
       try {
         const ct = await encryptFile(b64d(key), new Uint8Array(stored.data))
         await putBlob(blob, ct, 1, this.auth!)
-        await this.sendContent(contact, { id: msg.id, ts: msg.ts, type: 'file', body: { blob, key, size, name, mime } }, msg.id)
+        const body = {
+          blob, key, size, name, mime,
+          ...(msg.text ? { caption: msg.text } : {}),
+          ...(msg.album ? { album: msg.album } : {}),
+        }
+        await this.sendContent(contact, { id: msg.id, ts: msg.ts, type: 'file', body }, msg.id)
       } catch (e) {
         if (e instanceof BlobError && !e.permanent) {
           this.retryLater(() => this.upload(msgId))
@@ -745,7 +785,14 @@ export class Messenger {
       case 'file': {
         const file = parseFile(c.body)
         if (!file) return
-        return this.storeIncoming(tx, contact, c, { type: 'file', text: '', file, transfer: 'down' }, fileLabel(file.name))
+        // Подпись к файлу хранится в text, как у обычного сообщения
+        const caption = typeof c.body.caption === 'string' ? c.body.caption.trim().slice(0, MAX_TEXT) : ''
+        const album = typeof c.body.album === 'string' && ID_RE.test(c.body.album) ? c.body.album : undefined
+        return this.storeIncoming(
+          tx, contact, c,
+          { type: 'file', text: caption, file, transfer: 'down', ...(album ? { album } : {}) },
+          fileLabel(file.name, caption),
+        )
       }
       case 'receipt': {
         const status = c.body?.status
@@ -773,7 +820,7 @@ export class Messenger {
     tx: ReceiveTx,
     contact: Contact,
     c: Content,
-    fields: Pick<Message, 'type' | 'text' | 'file' | 'transfer'>,
+    fields: Pick<Message, 'type' | 'text' | 'file' | 'transfer' | 'album'>,
     preview = fields.text,
   ): Promise<(() => void) | undefined> {
     const messages = tx.objectStore('messages')
@@ -929,7 +976,8 @@ class Waiters<T> {
 }
 
 /** Строка в списке чатов для сообщения с файлом */
-export const fileLabel = (name: string) => `📎 ${name}`
+/** Строка в списке чатов: подпись, если она есть, иначе имя файла. */
+export const fileLabel = (name: string, caption = '') => `📎 ${caption || name}`
 
 /** Имя файла без путей и управляющих символов, не длиннее 200 знаков (расширение сохраняется). */
 function cleanFileName(name: string): string {

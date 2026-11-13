@@ -55,7 +55,7 @@ export interface Message {
   /** Время отправки по часам отправителя */
   ts: number
   type: 'text' | 'file'
-  /** У файла — пустая строка */
+  /** У файла — подпись к нему (или пустая строка) */
   text: string
   status: MessageStatus
   /** Для входящих: отправлена ли квитанция «прочитано» */
@@ -66,6 +66,8 @@ export interface Message {
    * По этому полю (индекс byTransfer) передачи возобновляются после перезапуска.
    */
   transfer?: 'up' | 'down'
+  /** Файлы, отправленные одной пачкой, показываются одним пузырём-альбомом */
+  album?: string
 }
 
 export interface FileInfo {

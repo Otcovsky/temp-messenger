@@ -1,3 +1,4 @@
+import { Loader2, MessagesSquare, ShieldCheck, TriangleAlert } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Messenger } from '../core/messenger'
 import { checkSupport } from '../crypto/primitives'
@@ -69,14 +70,22 @@ export function App() {
     }
   }, [])
 
-  if (boot.kind === 'loading') return <Center>Загрузка…</Center>
-  if (boot.kind === 'error') return <Center>{boot.text}</Center>
-  if (boot.kind === 'locked') {
+  if (boot.kind === 'loading')
     return (
       <Center>
-        Мессенджер уже открыт в другой вкладке.
-        <br />
-        Закройте её — эта вкладка подхватит работу автоматически.
+        <Loader2 className="size-8 animate-spin text-violet-500" />
+      </Center>
+    )
+  if (boot.kind === 'error')
+    return (
+      <Center icon={<TriangleAlert className="size-7" />} title="Не получится запустить">
+        {boot.text}
+      </Center>
+    )
+  if (boot.kind === 'locked') {
+    return (
+      <Center icon={<MessagesSquare className="size-7" />} title="Открыто в другой вкладке">
+        Мессенджер работает только в одной вкладке. Закройте ту — эта подхватит работу автоматически.
       </Center>
     )
   }
@@ -104,13 +113,19 @@ function Main({ invite, clearInvite }: { invite: string | null; clearInvite: () 
   if (!m.hasAccount) return <Onboarding hasInvite={!!invite} />
 
   return (
-    <div className="app" data-view={active ? 'chat' : 'list'}>
-      <Sidebar active={active} onSelect={setActive} />
+    <div className="flex h-dvh overflow-hidden md:grid md:grid-cols-[minmax(320px,380px)_1fr]">
+      <Sidebar active={active} onSelect={setActive} hidden={!!active} />
       {active ? (
         <ChatView key={active} convId={active} onBack={() => setActive(null)} onDeleted={() => setActive(null)} />
       ) : (
-        <section className="chat empty">
-          <p>Выберите чат или пригласите собеседника.</p>
+        <section className="hidden flex-col items-center justify-center gap-4 bg-chat p-8 text-center md:flex">
+          <div className="grid size-20 place-items-center rounded-[28px] bg-brand text-white shadow-xl shadow-violet-500/30">
+            <ShieldCheck className="size-10" strokeWidth={1.75} />
+          </div>
+          <div>
+            <p className="text-lg font-semibold">Выберите чат</p>
+            <p className="muted mt-1">или пригласите собеседника — переписка шифруется прямо в браузере</p>
+          </div>
         </section>
       )}
       {invite && (
@@ -127,6 +142,18 @@ function Main({ invite, clearInvite }: { invite: string | null; clearInvite: () 
   )
 }
 
-function Center({ children }: { children: React.ReactNode }) {
-  return <div className="center-screen">{children}</div>
+function Center({ icon, title, children }: { icon?: React.ReactNode; title?: string; children: React.ReactNode }) {
+  return (
+    <div className="grid min-h-dvh place-items-center bg-aurora p-6 text-center">
+      <div className="flex max-w-sm flex-col items-center gap-4">
+        {icon && (
+          <div className="grid size-16 place-items-center rounded-3xl bg-brand text-white shadow-xl shadow-violet-500/30">
+            {icon}
+          </div>
+        )}
+        {title && <h1 className="text-xl font-bold">{title}</h1>}
+        <div className="muted leading-relaxed">{children}</div>
+      </div>
+    </div>
+  )
 }

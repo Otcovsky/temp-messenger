@@ -67,6 +67,10 @@ export interface FileContent extends Base {
     size: number
     name: string
     mime: string
+    /** подпись к файлу; нет поля — файл без подписи */
+    caption?: string
+    /** общий id файлов одной пачки (16 байт base64url): получатель собирает их в альбом */
+    album?: string
   }
 }
 

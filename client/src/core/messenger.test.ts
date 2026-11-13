@@ -356,10 +356,57 @@ describe('файлы', () => {
     })
     expect(mine.transfer).toBeUndefined()
     expect(new Uint8Array((await alice.fileData(mine.id))!)).toEqual(data)
+    expect(got.text).toBe('')
 
     // На сервере было только шифротекст, дополненный до размера по Padmé, и его больше нет
     await until(() => blobs.files.size === 0)
     for (const p of relay.seen) expect(p).not.toContain('отчёт')
+  })
+
+  it('подпись к файлу доходит вместе с ним и не теряется при повторной загрузке', async () => {
+    const { alice, bob, aliceConv, bobConv } = await connected()
+    blobs.failUploads = 1 // первая загрузка срывается — подпись должна уйти со второй
+    await alice.sendFile(aliceConv, new File([bytes(10)], 'photo.png', { type: 'image/png' }), '  Вид из окна  ')
+    expect(await fileMsg(alice, aliceConv)).toMatchObject({ text: 'Вид из окна', transfer: 'up' })
+    expect((await alice.conversations())[0].lastText).toBe('📎 Вид из окна')
+
+    alice.transport.stop()
+    alice.transport.start()
+    const got = await until(async () => {
+      const m = await fileMsg(bob, bobConv)
+      return m?.file?.state === 'ready' ? m : null
+    })
+    expect(got.text).toBe('Вид из окна')
+    expect(got.file?.name).toBe('photo.png')
+    expect((await bob.conversations())[0].lastText).toBe('📎 Вид из окна')
+    for (const p of relay.seen) expect(p).not.toContain('Вид из окна')
+  })
+
+  it('пачка файлов приходит альбомом: общий id, порядок сохранён, подпись у последнего', async () => {
+    const { alice, bob, aliceConv, bobConv } = await connected()
+    const files = ['1.png', '2.jpg', 'смета.xlsx'].map((n, i) => new File([bytes(10 + i)], n))
+    await alice.sendFiles(aliceConv, files, 'Всё по объекту')
+
+    const got = await until(async () => {
+      const list = (await bob.messages(bobConv)).filter((x: any) => x.type === 'file')
+      return list.length === 3 && list.every((x: any) => x.file?.state === 'ready') ? list : null
+    })
+    expect(got.map((x: any) => x.file.name)).toEqual(['1.png', '2.jpg', 'смета.xlsx'])
+    expect(new Set(got.map((x: any) => x.album)).size).toBe(1)
+    expect(got[0].album).toMatch(/^[A-Za-z0-9_-]{22}$/)
+    expect(got.map((x: any) => x.text)).toEqual(['', '', 'Всё по объекту'])
+    expect((await bob.conversations())[0].lastText).toBe('📎 Всё по объекту')
+
+    // У одиночного файла альбома нет
+    await alice.sendFile(aliceConv, new File([bytes(3)], 'one.txt'))
+    const single = await until(async () => (await bob.messages(bobConv)).find((x: any) => x.file?.name === 'one.txt'))
+    expect(single.album).toBeUndefined()
+  })
+
+  it('негодный файл в пачке — не отправляется ничего', async () => {
+    const { alice, aliceConv } = await connected()
+    await expect(alice.sendFiles(aliceConv, [new File([bytes(5)], 'ok.txt'), new File([], 'empty.txt')])).rejects.toThrow(/пустой/)
+    expect(await fileMsg(alice, aliceConv)).toBeUndefined()
   })
 
   it('без связи файл ждёт и уходит после переподключения', async () => {
