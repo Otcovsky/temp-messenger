@@ -24,8 +24,14 @@ export interface Contact {
   ik: string
   sigPub: string | null
   createdAt: number
-  /** Собеседник удалил чат: писать больше некуда */
+  /** Писать больше некуда: собеседник удалил чат или сервер не нашёл его ящик */
   gone?: boolean
+  /**
+   * Откуда известно, что писать некуда. 'goodbye' — собеседник сам удалил чат, это навсегда.
+   * 'no_mailbox' — так ответил сервер: ящик мог просто истечь, и если собеседник снова
+   * напишет, пометка снимается. Нет значения — запись от прежней версии.
+   */
+  goneBy?: 'goodbye' | 'no_mailbox'
 }
 
 export interface Conversation {
@@ -129,6 +135,27 @@ export async function writeAll<S extends Stores>(
   tx.done.catch(() => {}) // ошибку отдаём ниже; здесь — только чтобы не было «необработанного» отказа
   try {
     await Promise.all([...ops(tx), tx.done])
+  } catch (e) {
+    try {
+      tx.abort()
+    } catch {
+      /* уже завершена или откатана */
+    }
+    throw e
+  }
+}
+
+/**
+ * Чтение и запись одной транзакцией: либо всё, либо ничего. Внутри fn можно ждать только
+ * операции самой транзакции — на любом другом await браузер её закроет.
+ */
+export async function transact<S extends Stores, T>(db: DB, stores: S, fn: (tx: WriteTx<S>) => Promise<T>): Promise<T> {
+  const tx = db.transaction(stores, 'readwrite')
+  tx.done.catch(() => {})
+  try {
+    const out = await fn(tx)
+    await tx.done
+    return out
   } catch (e) {
     try {
       tx.abort()

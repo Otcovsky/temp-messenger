@@ -17,7 +17,7 @@ import {
   safetyNumber,
 } from '../crypto/handshake'
 import { type KeyPair, generateDH, generateSigning } from '../crypto/primitives'
-import { ratchetDecrypt, ratchetEncrypt } from '../crypto/ratchet'
+import { type RatchetState, ratchetDecrypt, ratchetEncrypt } from '../crypto/ratchet'
 import { type Content, decodeContent, decodePayload, encodeContent, encodePayload } from '../protocol/envelope'
 import {
   type Contact,
@@ -38,6 +38,8 @@ import {
   pendingUnregisters,
   queueUnregister,
   saveAccount,
+  transact,
+  type WriteTx,
   wipeStore,
   writeAll,
 } from '../storage/db'
@@ -70,6 +72,14 @@ function serverRefusal(code: string): string {
 const STATUS_RANK: Record<MessageStatus, number> = {
   failed: -1, pending: 0, sent: 1, delivered: 2, read: 3, received: 0,
 }
+
+/** Статус только растёт (sent → delivered → read); failed — особый случай: только из pending. */
+function statusAdvances(from: MessageStatus, to: MessageStatus): boolean {
+  return to === 'failed' ? from === 'pending' : STATUS_RANK[to] > STATUS_RANK[from]
+}
+
+/** Транзакция, в которой входящее сообщение записывается вместе с новым состоянием храповика. */
+type ReceiveTx = WriteTx<('sessions' | 'contacts' | 'conversations' | 'messages')[]>
 
 export class Messenger {
   private identity: Identity | null = null
@@ -226,9 +236,16 @@ export class Messenger {
         }
         this.handled.add(f.id)
         if (this.handled.size > HANDLED_MAX) this.handled.delete(this.handled.values().next().value!)
-        void this.serial(() => this.receive(f.mailbox, f.payload))
-          .catch((e) => console.warn('Не удалось обработать сообщение', e))
-          .finally(() => this.transport?.send({ t: 'ack', mailbox: f.mailbox, ids: [f.id] }))
+        void this.serial(() => this.receive(f.mailbox, f.payload)).then(
+          () => this.transport?.send({ t: 'ack', mailbox: f.mailbox, ids: [f.id] }),
+          (e) => {
+            // receive() бросает только при сбое базы (негодные сообщения он отбрасывает сам).
+            // Не подтверждаем: сообщение останется на сервере и придёт снова при следующем
+            // подключении. В базу при этом ничего не попало, так что оно расшифруется.
+            console.warn('Не удалось сохранить сообщение, сервер пришлёт его ещё раз', e)
+            this.handled.delete(f.id)
+          },
+        )
         break
       case 'sent':
         void this.onSent(f.id, f.failed)
@@ -267,10 +284,12 @@ export class Messenger {
     const item = await this.db.get('outbox', id)
     if (!item) return
     await this.db.delete('outbox', id)
-    if (failed.some((f) => f.reason === 'no_mailbox')) {
-      const contacts = await this.db.getAll('contacts')
-      for (const c of contacts) {
-        if (c.theirMailbox && failed.some((f) => f.to === c.theirMailbox)) await this.db.put('contacts', { ...c, gone: true })
+    const lost = new Set(failed.filter((f) => f.reason === 'no_mailbox').map((f) => f.to))
+    if (lost.size) {
+      for (const c of await this.db.getAll('contacts')) {
+        if (c.theirMailbox && !c.gone && lost.has(c.theirMailbox)) {
+          await this.db.put('contacts', { ...c, gone: true, goneBy: 'no_mailbox' })
+        }
       }
     }
     if (item.msgId) await this.updateStatus(item.msgId, failed.length ? 'failed' : 'sent')
@@ -461,32 +480,50 @@ export class Messenger {
 
   // --- приём ---------------------------------------------------------------
 
+  /**
+   * Разобрать входящее сообщение. Негодное (не разбирается, не расшифровывается) молча
+   * отбрасывается: повторная доставка его не исправит. Исключение отсюда означает сбой базы —
+   * тогда сообщение не подтверждается серверу и придёт ещё раз.
+   */
   private async receive(mailbox: string, raw: string): Promise<void> {
-    const { header, ct, pk } = decodePayload(raw)
-    let contact = await this.db.getFromIndex('contacts', 'byMyMailbox', mailbox)
+    let parsed: ReturnType<typeof decodePayload>
+    try {
+      parsed = decodePayload(raw)
+    } catch (e) {
+      console.warn('Сообщение не разобрано', e)
+      return
+    }
+    const { header, ct, pk } = parsed
+    const known = await this.db.getFromIndex('contacts', 'byMyMailbox', mailbox)
 
-    if (!contact) {
+    if (!known) {
       // Первое сообщение по моему приглашению
       const invite = await this.db.get('invites', mailbox)
       if (!invite || !pk) return
-      const state = await completeInvite(this.identity!, invite, pk)
-      const r = await ratchetDecrypt(state, header, ct)
-      const hello = decodeContent(r.plaintext)
-      if (hello?.type !== 'hello' || !MAILBOX_RE.test(hello.body.mailbox)) return
-      contact = {
+      let opened: { state: RatchetState; theirIk: string; hello: Content | null }
+      try {
+        const { session, theirIk } = await completeInvite(this.identity!, invite, pk)
+        const r = await ratchetDecrypt(session, header, ct)
+        opened = { state: r.state, theirIk: b64e(theirIk), hello: decodeContent(r.plaintext) }
+      } catch (e) {
+        console.warn('Ответ на приглашение не расшифрован', e)
+        return
+      }
+      const { hello } = opened
+      if (hello?.type !== 'hello' || !MAILBOX_RE.test(hello.body?.mailbox)) return
+      const created: Contact = {
         id: randomId(),
         name: String(hello.body.name || '').trim().slice(0, 64) || 'Без имени',
         myMailbox: mailbox,
         theirMailbox: hello.body.mailbox,
-        ik: pk.ik,
+        ik: opened.theirIk,
         sigPub: typeof hello.body.sigPub === 'string' ? hello.body.sigPub : null,
         createdAt: Date.now(),
       }
-      const created = contact
       await writeAll(this.db, ['invites', 'contacts', 'sessions', 'conversations'], (tx) => [
         tx.objectStore('invites').delete(mailbox), // приглашение одноразовое
         tx.objectStore('contacts').put(created),
-        tx.objectStore('sessions').put({ contactId: created.id, state: r.state }),
+        tx.objectStore('sessions').put({ contactId: created.id, state: opened.state }),
         tx.objectStore('conversations').put(newConversation(created)),
       ])
       // Ящик теперь обычный: повторно открытая ссылка не создаст «мёртвый» чат
@@ -495,57 +532,90 @@ export class Messenger {
       return
     }
 
-    const sess = await this.db.get('sessions', contact.id)
+    const sess = await this.db.get('sessions', known.id)
     if (!sess) return
-    const r = await ratchetDecrypt(sess.state, header, ct)
-    // Собеседник ответил — prekey-заголовок больше не нужен
-    await this.db.put('sessions', { contactId: contact.id, state: r.state })
-    const content = decodeContent(r.plaintext)
-    if (content) await this.handleContent(contact, content)
+    let state: RatchetState
+    let content: Content | null = null
+    try {
+      const r = await ratchetDecrypt(sess.state, header, ct)
+      state = r.state
+      try {
+        content = decodeContent(r.plaintext)
+      } catch (e) {
+        // Расшифровано, но внутри мусор: ключ израсходован, состояние всё равно сохраняем
+        console.warn('Содержимое сообщения не разобрано', e)
+      }
+    } catch (e) {
+      console.warn('Сообщение не расшифровано', e)
+      return
+    }
+
+    // Состояние храповика и само сообщение пишутся вместе. Иначе при сбое между двумя записями
+    // ключ был бы уже израсходован, а сообщение не сохранено — и повторная доставка не помогла бы.
+    const after = await transact(this.db, ['sessions', 'contacts', 'conversations', 'messages'], async (tx: ReceiveTx) => {
+      // Собеседник ответил — prekey-заголовок больше не нужен
+      await tx.objectStore('sessions').put({ contactId: known.id, state })
+      let contact = known
+      if (contact.gone && contact.goneBy !== 'goodbye' && content?.type !== 'goodbye') {
+        // Сервер когда-то не нашёл его ящик (истёк, пока человек был не в сети), но он вернулся
+        const { gone: _gone, goneBy: _goneBy, ...alive } = contact
+        contact = alive
+        await tx.objectStore('contacts').put(contact)
+      }
+      return content ? this.applyContent(tx, contact, content) : undefined
+    })
+    after?.()
     this.emit()
   }
 
-  private async handleContent(contact: Contact, c: Content) {
+  /**
+   * Записать содержимое входящего сообщения в транзакцию приёма. Возвращает действие,
+   * которое надо выполнить после её фиксации (отправить квитанцию).
+   */
+  private async applyContent(tx: ReceiveTx, contact: Contact, c: Content): Promise<(() => void) | undefined> {
     switch (c.type) {
       case 'text': {
-        if (await this.db.get('messages', c.id)) return
-        const conv = await this.db.get('conversations', contact.id)
+        const messages = tx.objectStore('messages')
+        const conversations = tx.objectStore('conversations')
+        if (await messages.get(c.id)) return
+        const conv = await conversations.get(contact.id)
         if (!conv) return
         const text = String(c.body?.text ?? '').slice(0, MAX_TEXT)
         const isOpen = this.activeConv === conv.id && document.visibilityState === 'visible'
-        await this.db.put('messages', {
+        await messages.put({
           id: c.id, conv: conv.id, from: contact.id, ts: c.ts, type: 'text', text, status: 'received', readSent: isOpen,
         })
-        await this.db.put('conversations', {
+        await conversations.put({
           ...conv, lastTs: Math.max(conv.lastTs, c.ts), lastText: text, unread: isOpen ? 0 : conv.unread + 1,
         })
         // Без await: мы внутри serial(), а отправка сама встаёт в ту же очередь
-        void this.sendReceipt(contact, isOpen ? 'read' : 'delivered', [c.id])
-        break
+        return () => void this.sendReceipt(contact, isOpen ? 'read' : 'delivered', [c.id])
       }
       case 'receipt': {
-        const ids = Array.isArray(c.body?.ids) ? c.body.ids.slice(0, 500) : []
+        const status = c.body?.status
+        if (status !== 'delivered' && status !== 'read') return
+        const messages = tx.objectStore('messages')
+        const ids = Array.isArray(c.body.ids) ? c.body.ids.slice(0, 500) : []
         for (const id of ids) {
-          const m = await this.db.get('messages', String(id))
-          if (m && m.from === 'me' && m.conv === contact.id) await this.updateStatus(m.id, c.body.status)
+          const m = await messages.get(String(id))
+          if (m && m.from === 'me' && m.conv === contact.id && statusAdvances(m.status, status)) {
+            await messages.put({ ...m, status })
+          }
         }
-        break
+        return
       }
       case 'goodbye':
-        await this.db.put('contacts', { ...contact, gone: true })
-        break
+        await tx.objectStore('contacts').put({ ...contact, gone: true, goneBy: 'goodbye' })
+        return
       case 'hello':
-        break // повторный hello по уже установленной сессии — игнорируем
+        return // повторный hello по уже установленной сессии — игнорируем
     }
   }
 
   private async updateStatus(id: string, status: MessageStatus) {
     const m = await this.db.get('messages', id)
     if (!m) return
-    // Статус только растёт (sent → delivered → read); failed — особый случай
-    if (status === 'failed' ? m.status === 'pending' : STATUS_RANK[status] > STATUS_RANK[m.status]) {
-      await this.db.put('messages', { ...m, status })
-    }
+    if (statusAdvances(m.status, status)) await this.db.put('messages', { ...m, status })
   }
 
   // --- для UI --------------------------------------------------------------

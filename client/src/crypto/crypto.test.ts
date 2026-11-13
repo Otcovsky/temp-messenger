@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { type Bytes, b64d, pad, unpad, utf8, fromUtf8 } from './bytes'
+import { type Bytes, b64d, b64e, pad, unpad, utf8, fromUtf8 } from './bytes'
 import { acceptInvite, completeInvite, createInvite, decodeInvite, encodeInvite, safetyNumber, type Identity } from './handshake'
 import { _forceFallback, dh, generateDH, generateSigning, sign, verify } from './primitives'
 import { type RatchetState, ratchetDecrypt, ratchetEncrypt } from './ratchet'
@@ -14,8 +14,8 @@ async function pair() {
   const invite = await createInvite(alice, 'Алиса')
   const parsed = decodeInvite(encodeInvite(invite.payload))
   const { session: bobS, preKey } = await acceptInvite(bob, parsed)
-  const aliceS = await completeInvite(alice, invite, preKey)
-  return { alice, bob, aliceS, bobS }
+  const { session: aliceS, theirIk } = await completeInvite(alice, invite, preKey)
+  return { alice, bob, aliceS, bobS, invite, preKey, theirIk }
 }
 
 async function enc(s: RatchetState, text: string) {
@@ -89,6 +89,25 @@ describe('handshake + double ratchet', () => {
     await expect(dec(aliceS, e.msg)).rejects.toThrow()
   })
 
+  it('ключ личности принявшего не виден в prekey-заголовке', async () => {
+    const { alice, bob, invite, preKey, theirIk } = await pair()
+    expect(theirIk).toEqual(bob.dh.pub)
+    expect(b64d(preKey.ik).length).toBe(48)
+    expect(JSON.stringify(preKey)).not.toContain(b64e(bob.dh.pub))
+    // подменённый заголовок не принимается
+    const forged = { ...preKey, ik: b64e(b64d(preKey.ik).map((x, i) => (i ? x : x ^ 1))) }
+    await expect(completeInvite(alice, invite, forged)).rejects.toThrow()
+  })
+
+  it('открытый ключ личности от старого клиента принимается', async () => {
+    const { alice, bob, invite, preKey, aliceS, bobS } = await pair()
+    const legacy = await completeInvite(alice, invite, { ...preKey, ik: b64e(bob.dh.pub) })
+    expect(legacy.theirIk).toEqual(bob.dh.pub)
+    expect(legacy.session.rk).toEqual(aliceS.rk)
+    const e = await enc(bobS, 'привет')
+    expect((await dec(legacy.session, e.msg)).text).toBe('привет')
+  })
+
   it('код безопасности одинаковый у обоих', async () => {
     const { alice, bob } = await pair()
     const a = await safetyNumber(alice.dh.pub, bob.dh.pub)
@@ -128,7 +147,7 @@ describe('handshake + double ratchet', () => {
       // Полный обмен: пригласил «нативный», принял «JS»
       const invite = await createInvite(nat, 'A')
       const { session: bobS, preKey } = await acceptInvite(js, decodeInvite(encodeInvite(invite.payload)))
-      const aliceS = await completeInvite(nat, invite, preKey)
+      const { session: aliceS } = await completeInvite(nat, invite, preKey)
       const e = await enc(bobS, 'привет')
       expect((await dec(aliceS, e.msg)).text).toBe('привет')
     } finally {
