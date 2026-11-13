@@ -5,7 +5,8 @@
  * выполняются строго по очереди через serial(): иначе два параллельных
  * сообщения испортили бы сессию.
  */
-import { b64d, b64e, randomId } from '../crypto/bytes'
+import { type Bytes, b64d, b64e, randomId } from '../crypto/bytes'
+import { decryptFile, encryptFile, newFileKey } from '../crypto/file'
 import {
   type Identity,
   type InvitePayload,
@@ -23,6 +24,7 @@ import {
   type Contact,
   type Conversation,
   type DB,
+  type FileInfo,
   type Message,
   type MessageStatus,
   type Profile,
@@ -43,11 +45,18 @@ import {
   wipeStore,
   writeAll,
 } from '../storage/db'
+import { BlobError, blobDone, getBlob, putBlob } from '../transport/blobs'
 import { type ConnStatus, type InviteState, type ServerFrame, Transport, defaultServerUrl } from '../transport/ws'
 
 const INVITE_TTL_MS = 30 * 24 * 3600 * 1000
 const MAX_TEXT = 10_000
 const MAILBOX_RE = /^[A-Za-z0-9_-]{22}$/
+/** Самый большой файл, который можно отправить */
+export const MAX_FILE = 25 * 1024 * 1024
+const BLOB_ID_RE = MAILBOX_RE
+const FILE_KEY_RE = /^[A-Za-z0-9_-]{43}$/
+/** Через сколько повторить передачу файла после сбоя связи, если соединение с сервером живо */
+const TRANSFER_RETRY_MS = 20_000
 const PROBE_TIMEOUT_MS = 10_000
 const REGISTER_TIMEOUT_MS = 8_000
 /** Сколько id уже обработанных входящих помнить, чтобы не разбирать повторную доставку */
@@ -102,6 +111,8 @@ export class Messenger {
    * использованным ключом храповика заканчивается ошибкой.
    */
   private handled = new Set<string>()
+  /** Id сообщений, чей файл сейчас загружается или скачивается */
+  private transfers = new Set<string>()
   /** Растёт при каждом изменении — UI по нему перечитывает данные */
   version = 0
 
@@ -225,6 +236,7 @@ export class Messenger {
     for (const r of await mailboxRegistrations(this.db)) this.transport?.send({ t: 'register', ...r })
     for (const mailbox of await pendingUnregisters(this.db)) this.transport?.send({ t: 'unregister', mailbox })
     await this.flushOutbox()
+    void this.resumeTransfers().catch((e) => console.warn('Не удалось возобновить передачу файлов', e))
   }
 
   private onFrame(f: ServerFrame) {
@@ -426,12 +438,17 @@ export class Messenger {
 
   // --- отправка ------------------------------------------------------------
 
-  async sendText(convId: string, text: string): Promise<void> {
-    text = text.trim().slice(0, MAX_TEXT)
-    if (!text) return
+  private async directChat(convId: string): Promise<{ conv: Conversation; contact: Contact }> {
     const conv = await this.db.get('conversations', convId)
     const contact = conv && (await this.db.get('contacts', conv.members[0]))
     if (!conv || !contact) throw new Error('Беседа не найдена')
+    return { conv, contact }
+  }
+
+  async sendText(convId: string, text: string): Promise<void> {
+    text = text.trim().slice(0, MAX_TEXT)
+    if (!text) return
+    const { conv, contact } = await this.directChat(convId)
     const msg: Message = { id: randomId(), conv: convId, from: 'me', ts: Date.now(), type: 'text', text, status: 'pending' }
     await this.db.put('messages', msg)
     await this.db.put('conversations', { ...conv, lastTs: msg.ts, lastText: text })
@@ -445,12 +462,161 @@ export class Messenger {
     }
   }
 
+  /**
+   * Отправить файл. Он шифруется своим ключом и загружается на сервер, собеседнику уходит
+   * сообщение с id файла и ключом. Бросает, если файл не подходит или сервер его не принял;
+   * без связи сообщение ждёт отправки, как обычное.
+   */
+  async sendFile(convId: string, file: File): Promise<void> {
+    const name = cleanFileName(file.name)
+    if (file.size > MAX_FILE) throw new Error(`«${name}» больше ${MAX_FILE / 1024 / 1024} МБ, такие файлы отправить нельзя.`)
+    if (!file.size) throw new Error(`«${name}» — пустой файл.`)
+    const { conv, contact } = await this.directChat(convId)
+    if (!contact.theirMailbox || contact.gone) throw new Error('Собеседнику больше нельзя писать')
+    const data = await file.arrayBuffer()
+    const msg: Message = {
+      id: randomId(), conv: convId, from: 'me', ts: Date.now(), type: 'file', text: '', status: 'pending', transfer: 'up',
+      file: { name, mime: cleanMime(file.type), size: data.byteLength, blob: randomId(), key: b64e(newFileKey()), state: 'ready' },
+    }
+    await writeAll(this.db, ['messages', 'files', 'conversations'], (tx) => [
+      tx.objectStore('messages').put(msg),
+      tx.objectStore('files').put({ id: msg.id, data }),
+      tx.objectStore('conversations').put({ ...conv, lastTs: msg.ts, lastText: fileLabel(name) }),
+    ])
+    this.emit()
+    await this.upload(msg.id)
+  }
+
   /** Повторить отправку сообщения, которое не дошло до сервера. */
   async retry(msgId: string): Promise<void> {
     const msg = await this.db.get('messages', msgId)
     if (!msg || msg.from !== 'me' || msg.status !== 'failed') return
+    if (msg.type === 'file') {
+      // Ключ и id файла прежние: шифротекст тот же, и если файл уже на сервере, он примет повтор
+      await this.db.put('messages', { ...msg, status: 'pending', transfer: 'up' })
+      this.emit()
+      await this.upload(msgId)
+      return
+    }
     await this.db.delete('messages', msgId)
     await this.sendText(msg.conv, msg.text)
+  }
+
+  /** Скачать снова файл, который не удалось скачать или расшифровать. */
+  async retryDownload(msgId: string): Promise<void> {
+    const msg = await this.db.get('messages', msgId)
+    if (!msg?.file || msg.from === 'me' || msg.file.state !== 'error') return
+    await this.db.put('messages', { ...msg, transfer: 'down', file: { ...msg.file, state: 'loading' } })
+    this.emit()
+    await this.download(msgId)
+  }
+
+  /** Содержимое файла из сообщения, если оно уже есть в базе. */
+  async fileData(msgId: string): Promise<ArrayBuffer | undefined> {
+    return (await this.db.get('files', msgId))?.data
+  }
+
+  // --- передача файлов -------------------------------------------------------
+
+  /** Возобновить передачи, прерванные перезапуском или потерей связи. По одной, чтобы не забить канал. */
+  private async resumeTransfers() {
+    for (const m of await this.db.getAllFromIndex('messages', 'byTransfer', 'up')) {
+      await this.upload(m.id).catch((e) => console.warn('Файл не отправлен', e))
+    }
+    for (const m of await this.db.getAllFromIndex('messages', 'byTransfer', 'down')) await this.download(m.id)
+  }
+
+  /** Сбой связи при живом соединении (например, сервер перезапускался): попробовать ещё раз позже. */
+  private retryLater(fn: () => Promise<void>) {
+    setTimeout(() => {
+      if (this.transport?.isReady) void fn().catch(() => {})
+    }, TRANSFER_RETRY_MS)
+  }
+
+  /**
+   * Загрузить файл своего сообщения на сервер и отправить собеседнику сообщение о нём.
+   * Бросает, если сервер отказал (сообщение помечается неотправленным). При сбое связи
+   * сообщение остаётся в ожидании, и загрузка повторится.
+   */
+  private async upload(msgId: string): Promise<void> {
+    if (this.transfers.has(msgId)) return
+    this.transfers.add(msgId)
+    try {
+      const msg = await this.db.get('messages', msgId)
+      if (!msg?.file || msg.transfer !== 'up') return
+      const contact = await this.db.get('contacts', msg.conv)
+      const stored = await this.db.get('files', msgId)
+      if (!contact || !stored) return await this.finishUpload(msgId, true)
+      const { blob, key, size, name, mime } = msg.file
+      try {
+        const ct = await encryptFile(b64d(key), new Uint8Array(stored.data))
+        await putBlob(blob, ct, 1, this.auth!)
+        await this.sendContent(contact, { id: msg.id, ts: msg.ts, type: 'file', body: { blob, key, size, name, mime } }, msg.id)
+      } catch (e) {
+        if (e instanceof BlobError && !e.permanent) {
+          this.retryLater(() => this.upload(msgId))
+          return
+        }
+        await this.finishUpload(msgId, true)
+        throw e
+      }
+      await this.finishUpload(msgId, false)
+    } finally {
+      this.transfers.delete(msgId)
+    }
+  }
+
+  private async finishUpload(msgId: string, failed: boolean) {
+    await transact(this.db, ['messages'], async (tx) => {
+      const m = await tx.objectStore('messages').get(msgId)
+      if (!m) return
+      const { transfer: _transfer, ...rest } = m
+      await tx.objectStore('messages').put(failed && m.status === 'pending' ? { ...rest, status: 'failed' } : rest)
+    })
+    this.emit()
+  }
+
+  /** Скачать и расшифровать файл входящего сообщения. */
+  private async download(msgId: string): Promise<void> {
+    if (this.transfers.has(msgId)) return
+    this.transfers.add(msgId)
+    try {
+      const msg = await this.db.get('messages', msgId)
+      if (!msg?.file || msg.transfer !== 'down') return
+      const { blob, key, size } = msg.file
+      let ct: Bytes | null
+      try {
+        ct = await getBlob(blob)
+      } catch (e) {
+        if (e instanceof BlobError && !e.permanent) return this.retryLater(() => this.download(msgId))
+        console.warn('Файл не скачан', e)
+        return await this.finishDownload(msgId, 'error')
+      }
+      if (!ct) return await this.finishDownload(msgId, 'gone')
+      let data: Bytes
+      try {
+        data = await decryptFile(b64d(key), ct)
+        if (data.length !== size) throw new Error('размер не совпадает')
+      } catch (e) {
+        console.warn('Файл не расшифрован', e)
+        return await this.finishDownload(msgId, 'error')
+      }
+      await this.finishDownload(msgId, 'ready', data)
+      void blobDone(blob)
+    } finally {
+      this.transfers.delete(msgId)
+    }
+  }
+
+  private async finishDownload(msgId: string, state: FileInfo['state'], data?: Bytes) {
+    await transact(this.db, ['messages', 'files'], async (tx) => {
+      const m = await tx.objectStore('messages').get(msgId)
+      if (!m?.file) return // чат удалили, пока файл скачивался
+      const { transfer: _transfer, ...rest } = m
+      if (data) await tx.objectStore('files').put({ id: msgId, data: data.buffer })
+      await tx.objectStore('messages').put({ ...rest, file: { ...m.file, state } })
+    })
+    this.emit()
   }
 
   private sendContent(contact: Contact, content: Content, msgId?: string): Promise<void> {
@@ -574,22 +740,12 @@ export class Messenger {
    */
   private async applyContent(tx: ReceiveTx, contact: Contact, c: Content): Promise<(() => void) | undefined> {
     switch (c.type) {
-      case 'text': {
-        const messages = tx.objectStore('messages')
-        const conversations = tx.objectStore('conversations')
-        if (await messages.get(c.id)) return
-        const conv = await conversations.get(contact.id)
-        if (!conv) return
-        const text = String(c.body?.text ?? '').slice(0, MAX_TEXT)
-        const isOpen = this.activeConv === conv.id && document.visibilityState === 'visible'
-        await messages.put({
-          id: c.id, conv: conv.id, from: contact.id, ts: c.ts, type: 'text', text, status: 'received', readSent: isOpen,
-        })
-        await conversations.put({
-          ...conv, lastTs: Math.max(conv.lastTs, c.ts), lastText: text, unread: isOpen ? 0 : conv.unread + 1,
-        })
-        // Без await: мы внутри serial(), а отправка сама встаёт в ту же очередь
-        return () => void this.sendReceipt(contact, isOpen ? 'read' : 'delivered', [c.id])
+      case 'text':
+        return this.storeIncoming(tx, contact, c, { type: 'text', text: String(c.body?.text ?? '').slice(0, MAX_TEXT) })
+      case 'file': {
+        const file = parseFile(c.body)
+        if (!file) return
+        return this.storeIncoming(tx, contact, c, { type: 'file', text: '', file, transfer: 'down' }, fileLabel(file.name))
       }
       case 'receipt': {
         const status = c.body?.status
@@ -612,10 +768,37 @@ export class Messenger {
     }
   }
 
+  /** Записать входящее сообщение и обновить беседу. */
+  private async storeIncoming(
+    tx: ReceiveTx,
+    contact: Contact,
+    c: Content,
+    fields: Pick<Message, 'type' | 'text' | 'file' | 'transfer'>,
+    preview = fields.text,
+  ): Promise<(() => void) | undefined> {
+    const messages = tx.objectStore('messages')
+    const conversations = tx.objectStore('conversations')
+    if (await messages.get(c.id)) return
+    const conv = await conversations.get(contact.id)
+    if (!conv) return
+    const isOpen = this.activeConv === conv.id && document.visibilityState === 'visible'
+    await messages.put({ id: c.id, conv: conv.id, from: contact.id, ts: c.ts, status: 'received', readSent: isOpen, ...fields })
+    await conversations.put({
+      ...conv, lastTs: Math.max(conv.lastTs, c.ts), lastText: preview, unread: isOpen ? 0 : conv.unread + 1,
+    })
+    return () => {
+      // Без await: мы внутри serial(), а отправка сама встаёт в ту же очередь
+      void this.sendReceipt(contact, isOpen ? 'read' : 'delivered', [c.id])
+      if (fields.transfer === 'down') void this.download(c.id)
+    }
+  }
+
+  /** Чтение и запись одной транзакцией: параллельная запись того же сообщения (файл скачался) не затрётся. */
   private async updateStatus(id: string, status: MessageStatus) {
-    const m = await this.db.get('messages', id)
-    if (!m) return
-    if (statusAdvances(m.status, status)) await this.db.put('messages', { ...m, status })
+    await transact(this.db, ['messages'], async (tx) => {
+      const m = await tx.objectStore('messages').get(id)
+      if (m && statusAdvances(m.status, status)) await tx.objectStore('messages').put({ ...m, status })
+    })
   }
 
   // --- для UI --------------------------------------------------------------
@@ -631,7 +814,12 @@ export class Messenger {
     if (!conv || !contact) return
     const unreadMsgs = (await listMessages(this.db, convId)).filter((m) => m.from !== 'me' && !m.readSent)
     if (!unreadMsgs.length && !conv.unread) return
-    for (const m of unreadMsgs) await this.db.put('messages', { ...m, readSent: true })
+    await transact(this.db, ['messages'], async (tx) => {
+      for (const { id } of unreadMsgs) {
+        const cur = await tx.objectStore('messages').get(id)
+        if (cur) await tx.objectStore('messages').put({ ...cur, readSent: true })
+      }
+    })
     await this.db.put('conversations', { ...conv, unread: 0 })
     this.emit()
     await this.sendReceipt(contact, 'read', unreadMsgs.map((m) => m.id))
@@ -641,11 +829,12 @@ export class Messenger {
     const contact = await this.db.get('contacts', convId)
     if (contact) await this.sendGoodbye(contact).catch(() => {})
     const msgs = await listMessages(this.db, convId)
-    await writeAll(this.db, ['contacts', 'sessions', 'conversations', 'messages'], (tx) => [
+    await writeAll(this.db, ['contacts', 'sessions', 'conversations', 'messages', 'files'], (tx) => [
       tx.objectStore('contacts').delete(convId),
       tx.objectStore('sessions').delete(convId),
       tx.objectStore('conversations').delete(convId),
       ...msgs.map((m) => tx.objectStore('messages').delete(m.id)),
+      ...msgs.filter((m) => m.type === 'file').map((m) => tx.objectStore('files').delete(m.id)),
     ])
     // Ящик закрываем после удаления: если запись не удалась, чат остаётся рабочим
     if (contact) await this.closeMailbox(contact.myMailbox)
@@ -737,6 +926,30 @@ class Waiters<T> {
     if (rest.length) this.map.set(key, rest)
     else this.map.delete(key)
   }
+}
+
+/** Строка в списке чатов для сообщения с файлом */
+export const fileLabel = (name: string) => `📎 ${name}`
+
+/** Имя файла без путей и управляющих символов, не длиннее 200 знаков (расширение сохраняется). */
+function cleanFileName(name: string): string {
+  const n = name.replace(/[\u0000-\u001f\u007f/\\]/g, '_').trim()
+  return (n.length > 200 ? `${n.slice(0, 150)}…${n.slice(-49)}` : n) || 'файл'
+}
+
+function cleanMime(mime: string): string {
+  mime = mime.toLowerCase()
+  return mime.length <= 100 && /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/.test(mime) ? mime : 'application/octet-stream'
+}
+
+/** Проверить описание файла из входящего сообщения. */
+function parseFile(b: unknown): FileInfo | null {
+  if (!b || typeof b !== 'object') return null
+  const { blob, key, size, name, mime } = b as Record<string, unknown>
+  if (typeof blob !== 'string' || !BLOB_ID_RE.test(blob)) return null
+  if (typeof key !== 'string' || !FILE_KEY_RE.test(key)) return null
+  if (typeof size !== 'number' || !Number.isSafeInteger(size) || size < 1 || size > MAX_FILE) return null
+  return { blob, key, size, name: cleanFileName(String(name ?? '')), mime: cleanMime(String(mime ?? '')), state: 'loading' }
 }
 
 function newConversation(contact: Contact): Conversation {

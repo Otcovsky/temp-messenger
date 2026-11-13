@@ -35,4 +35,20 @@ systemctl --user status temp-messenger
 journalctl --user -u temp-messenger -f
 ```
 
-Данные ретранслятора: `~/temp-messenger/data/relay.sqlite3` (только зашифрованная очередь).
+Данные ретранслятора: `~/temp-messenger/data/relay.sqlite3` (только зашифрованная очередь) и
+`~/temp-messenger/data/blobs/` (зашифрованные файлы, стираются после скачивания или через 7 дней).
+
+## Файлы: разовая правка nginx (нужен sudo)
+
+`deploy.sh` не трогает живой конфиг nginx (его правил certbot). Для файлов в нём нужно две правки,
+обе уже есть в `deploy/nginx-site.conf`:
+
+1. В `Content-Security-Policy` к `img-src` добавить `blob:` — иначе картинки в чате не покажутся.
+2. Добавить `location /blob/` рядом с `location = /health` — иначе сервер отвечает на загрузку 405,
+   а на файл больше 1 МБ — 413.
+
+Обе делает скрипт (копия конфига — в `/root`, при ошибке `nginx -t` конфиг возвращается):
+
+```bash
+sudo bash ~/temp-messenger/deploy/nginx-add-blobs.sh
+```

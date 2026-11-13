@@ -155,3 +155,23 @@ describe('handshake + double ratchet', () => {
     }
   })
 })
+
+describe('шифрование файлов', () => {
+  it('туда и обратно, детерминированно для того же ключа, с дополнением по Padmé', async () => {
+    const { decryptFile, encryptFile, newFileKey, padmeLength } = await import('./file')
+    const key = newFileKey()
+    const data = new TextEncoder().encode('содержимое файла') as Uint8Array<ArrayBuffer>
+    const ct = await encryptFile(key, data)
+    expect(await encryptFile(key, data)).toEqual(ct)
+    expect(ct.length).toBe(padmeLength(data.length + 1) + 16)
+    expect(await decryptFile(key, ct)).toEqual(data)
+    await expect(decryptFile(newFileKey(), ct)).rejects.toThrow()
+
+    expect(padmeLength(1000)).toBe(1024)
+    for (const n of [1, 2, 9, 100, 4097, 1_000_000, 25 * 1024 * 1024]) {
+      const p = padmeLength(n)
+      expect(p).toBeGreaterThanOrEqual(n)
+      expect(p - n).toBeLessThanOrEqual(n * 0.12 + 1)
+    }
+  })
+})

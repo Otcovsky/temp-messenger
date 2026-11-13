@@ -36,7 +36,7 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return
   const url = new URL(req.url)
   if (url.origin !== self.location.origin) return
-  if (url.pathname === '/ws' || url.pathname === '/health') return
+  if (url.pathname === '/ws' || url.pathname === '/health' || url.pathname.startsWith('/blob/')) return
 
   if (req.mode === 'navigate') {
     // Любая страница приложения — это index.html; приглашение передаётся в #фрагменте

@@ -51,6 +51,25 @@ export interface TextContent extends Base {
   body: { text: string }
 }
 
+/**
+ * Файл. Сам он лежит на сервере зашифрованным (docs/protocol.md, «Файлы»), а здесь — как его
+ * скачать и расшифровать. Ключ один на файл, поэтому в группе один и тот же файл можно
+ * загрузить один раз и разослать всем.
+ */
+export interface FileContent extends Base {
+  type: 'file'
+  body: {
+    /** id на сервере, 16 байт base64url */
+    blob: string
+    /** ключ AES-256-GCM, 32 байта base64url */
+    key: string
+    /** размер исходного файла в байтах */
+    size: number
+    name: string
+    mime: string
+  }
+}
+
 /** Первое сообщение принявшего приглашение: куда ему писать и как его зовут. */
 export interface HelloContent extends Base {
   type: 'hello'
@@ -68,7 +87,7 @@ export interface GoodbyeContent extends Base {
   body: Record<string, never>
 }
 
-export type Content = TextContent | HelloContent | ReceiptContent | GoodbyeContent
+export type Content = TextContent | FileContent | HelloContent | ReceiptContent | GoodbyeContent
 
 export function encodeContent(c: Content): Bytes {
   return pad(utf8(JSON.stringify(c)))
@@ -82,4 +101,4 @@ export function decodeContent(b: Bytes): Content | null {
   return KNOWN_TYPES.has(c.type) ? (c as Content) : null
 }
 
-const KNOWN_TYPES = new Set(['text', 'hello', 'receipt', 'goodbye'])
+const KNOWN_TYPES = new Set(['text', 'file', 'hello', 'receipt', 'goodbye'])

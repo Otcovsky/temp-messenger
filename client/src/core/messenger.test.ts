@@ -6,7 +6,7 @@ import 'fake-indexeddb/auto'
 import { IDBFactory } from 'fake-indexeddb'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { relay, FakeTransport } = vi.hoisted(() => {
+const { relay, FakeTransport, blobs } = vi.hoisted(() => {
   type Frame = Record<string, any>
   interface Box {
     owner: FakeTransport
@@ -104,10 +104,43 @@ const { relay, FakeTransport } = vi.hoisted(() => {
     }
   }
 
-  return { relay, FakeTransport }
+  /** Хранилище файлов, как /blob на сервере: файл стирается, когда его скачают все получатели */
+  class Blobs {
+    files = new Map<string, { data: Uint8Array; remaining: number }>()
+    /** Следующие n загрузок падают со сбоем связи */
+    failUploads = 0
+
+    reset() {
+      this.files.clear()
+      this.failUploads = 0
+    }
+  }
+  const blobs = new Blobs()
+
+  return { relay, FakeTransport, blobs }
 })
 
 vi.mock('../transport/ws', () => ({ Transport: FakeTransport, defaultServerUrl: () => 'ws://test/ws' }))
+vi.mock('../transport/blobs', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../transport/blobs')>()
+  return {
+    BlobError: real.BlobError,
+    async putBlob(id: string, ct: Uint8Array, n: number) {
+      if (blobs.failUploads > 0) {
+        blobs.failUploads--
+        throw new real.BlobError('Нет связи с сервером.', false)
+      }
+      if (!blobs.files.has(id)) blobs.files.set(id, { data: ct.slice(), remaining: n })
+    },
+    async getBlob(id: string) {
+      return blobs.files.get(id)?.data.slice() ?? null
+    },
+    async blobDone(id: string) {
+      const f = blobs.files.get(id)
+      if (f && --f.remaining <= 0) blobs.files.delete(id)
+    },
+  }
+})
 
 import { Messenger } from './messenger'
 
@@ -185,6 +218,7 @@ function failNextMessageWrite(m: Client) {
 
 beforeEach(() => {
   relay.reset()
+  blobs.reset()
   vi.stubGlobal('document', { addEventListener() {}, removeEventListener() {}, visibilityState: 'visible' })
   vi.spyOn(console, 'warn').mockImplementation(() => {})
 })
@@ -294,5 +328,81 @@ describe('обмен сообщениями', () => {
     })
     expect(c.goneBy).toBe('goodbye')
     await expect(bob.sendText(bobConv, 'эй')).rejects.toThrow()
+  })
+})
+
+describe('файлы', () => {
+  const bytes = (n: number) => Uint8Array.from({ length: n }, (_, i) => (i * 31 + 7) & 0xff)
+  const fileMsg = async (m: Client, conv: string) => (await m.messages(conv)).find((x: any) => x.type === 'file')
+
+  it('файл шифруется, доходит целым и стирается с сервера после скачивания', async () => {
+    const { alice, bob, aliceConv, bobConv } = await connected()
+    const data = bytes(70_000)
+    await alice.sendFile(aliceConv, new File([data], 'отчёт.pdf', { type: 'application/pdf' }))
+
+    const got = await until(async () => {
+      const m = await fileMsg(bob, bobConv)
+      return m?.file?.state === 'ready' ? m : null
+    })
+    expect(got.file).toMatchObject({ name: 'отчёт.pdf', mime: 'application/pdf', size: data.length })
+    expect(got.transfer).toBeUndefined()
+    expect(new Uint8Array((await bob.fileData(got.id))!)).toEqual(data)
+    expect((await bob.conversations())[0].lastText).toBe('📎 отчёт.pdf')
+
+    // У отправителя: файл свой, сообщение доставлено
+    const mine = await until(async () => {
+      const m = await fileMsg(alice, aliceConv)
+      return m?.status === 'delivered' ? m : null
+    })
+    expect(mine.transfer).toBeUndefined()
+    expect(new Uint8Array((await alice.fileData(mine.id))!)).toEqual(data)
+
+    // На сервере было только шифротекст, дополненный до размера по Padmé, и его больше нет
+    await until(() => blobs.files.size === 0)
+    for (const p of relay.seen) expect(p).not.toContain('отчёт')
+  })
+
+  it('без связи файл ждёт и уходит после переподключения', async () => {
+    const { alice, bob, aliceConv, bobConv } = await connected()
+    blobs.failUploads = 1
+    await alice.sendFile(aliceConv, new File([bytes(10)], 'a.txt', { type: 'text/plain' }))
+    const waiting = await fileMsg(alice, aliceConv)
+    expect(waiting).toMatchObject({ status: 'pending', transfer: 'up' })
+
+    alice.transport.stop()
+    alice.transport.start()
+    await until(async () => (await fileMsg(bob, bobConv))?.file?.state === 'ready')
+  })
+
+  it('файла на сервере уже нет — получатель видит это, а не вечную загрузку', async () => {
+    const { alice, bob, aliceConv, bobConv } = await connected()
+    // Боб не в сети, пока файл лежит на сервере; за это время его стёрли
+    bob.transport.stop()
+    await alice.sendFile(aliceConv, new File([bytes(10)], 'b.bin'))
+    await until(() => blobs.files.size === 1)
+    blobs.files.clear()
+    bob.transport.start()
+    const m = await until(async () => {
+      const m = await fileMsg(bob, bobConv)
+      return m?.file?.state === 'gone' ? m : null
+    })
+    expect(m.file?.mime).toBe('application/octet-stream')
+  })
+
+  it('слишком большой и пустой файлы не отправляются', async () => {
+    const { alice, aliceConv } = await connected()
+    const big = new File([new Uint8Array(1)], 'big.iso')
+    Object.defineProperty(big, 'size', { value: 26 * 1024 * 1024 })
+    await expect(alice.sendFile(aliceConv, big)).rejects.toThrow(/больше 25 МБ/)
+    await expect(alice.sendFile(aliceConv, new File([], 'empty.txt'))).rejects.toThrow(/пустой/)
+    expect(await fileMsg(alice, aliceConv)).toBeUndefined()
+  })
+
+  it('удаление чата стирает и файлы', async () => {
+    const { alice, aliceConv } = await connected()
+    await alice.sendFile(aliceConv, new File([bytes(5)], 'c.txt'))
+    const m = (await fileMsg(alice, aliceConv))!
+    await alice.deleteConversation(aliceConv)
+    expect(await alice.fileData(m.id)).toBeUndefined()
   })
 })

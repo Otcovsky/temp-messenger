@@ -44,13 +44,14 @@ function serviceWorker(): Plugin {
   }
 }
 
-// В разработке WebSocket проксируется на локальный Python-сервер.
+// В разработке WebSocket и файлы проксируются на локальный Python-сервер.
 export default defineConfig({
   plugins: [react(), serviceWorker()],
   server: {
     port: 5173,
     proxy: {
       '/ws': { target: 'ws://127.0.0.1:8100', ws: true },
+      '/blob': { target: 'http://127.0.0.1:8100' },
     },
   },
   build: { target: 'es2022', sourcemap: true },

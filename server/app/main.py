@@ -12,6 +12,8 @@
   ← msg {id, mailbox, payload, ts}
   → ack {mailbox, ids:[...]}
   → ping                       ← pong
+
+Файлы — обычным HTTP, см. blobs.py.
 """
 
 import asyncio
@@ -28,6 +30,7 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
+from .blobs import BlobFiles, add_blob_routes, cleanup_blobs
 from .config import Settings, settings as default_settings
 from .store import RegisterResult, Store
 
@@ -115,8 +118,9 @@ def create_app(cfg: Settings = default_settings) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.store = Store(cfg.db_path)
+        app.state.blobs = BlobFiles(cfg.blob_dir)
         app.state.hub = Hub()
-        task = asyncio.create_task(cleanup_loop(app.state.store))
+        task = asyncio.create_task(cleanup_loop(app.state.store, app.state.blobs))
         try:
             yield
         finally:
@@ -125,12 +129,13 @@ def create_app(cfg: Settings = default_settings) -> FastAPI:
                 await task
             app.state.store.close()
 
-    async def cleanup_loop(store: Store) -> None:
+    async def cleanup_loop(store: Store, blobs: BlobFiles) -> None:
         while True:
             try:
                 msgs, boxes = store.cleanup(cfg.mailbox_idle_ttl_sec)
-                if msgs or boxes:
-                    log.info("cleanup: %d messages, %d mailboxes", msgs, boxes)
+                files = cleanup_blobs(store, blobs)
+                if msgs or boxes or files:
+                    log.info("cleanup: %d messages, %d mailboxes, %d files", msgs, boxes, files)
             except Exception:
                 log.exception("cleanup failed")
             await asyncio.sleep(cfg.cleanup_interval_sec)
@@ -140,6 +145,8 @@ def create_app(cfg: Settings = default_settings) -> FastAPI:
     @app.get("/health")
     async def health():
         return {"ok": True}
+
+    add_blob_routes(app, cfg)
 
     async def authenticate(ws: WebSocket) -> str:
         nonce = os.urandom(32)

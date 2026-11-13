@@ -182,3 +182,22 @@ label.button {
 .install-banner button.install { grid-column: 1 / -1; }
 .install-banner small { color: var(--muted); font-size: 12px; }
 .install-banner button.icon { padding: 4px 6px; color: var(--muted); align-self: start; }
+
+/* --- файлы --- */
+.composer .attach { padding: 6px 4px; align-self: center; }
+.chat.dragging .messages { outline: 2px dashed var(--accent); outline-offset: -8px; }
+.bubble.file { padding: 6px; }
+.bubble.file .meta { margin-right: 4px; }
+.file-image { display: block; border: 0; padding: 0; background: none; border-radius: 8px; overflow: hidden; }
+.file-image img { display: block; max-width: min(320px, 100%); max-height: 320px; object-fit: contain; }
+.file-view { display: block; max-width: 100%; max-height: 70vh; margin: 0 auto 12px; border-radius: 8px; }
+.file-card { display: flex; align-items: center; gap: 10px; padding: 4px 6px 0 2px; min-width: 0; }
+.file-icon {
+  flex: none; width: 40px; height: 40px; border-radius: 50%; padding: 0; border: 0;
+  background: var(--accent); color: var(--accent-text); font-size: 18px; display: grid; place-items: center;
+}
+.file-icon:disabled { background: var(--panel-2); color: var(--muted); opacity: 1; }
+.file-info { display: grid; min-width: 0; }
+.file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; font-weight: 600; color: var(--text); }
+.file-info small { font-size: 12px; }
+.file-info small .link { font-size: 12px; }

@@ -54,11 +54,40 @@ export interface Message {
   from: string
   /** Время отправки по часам отправителя */
   ts: number
-  type: 'text'
+  type: 'text' | 'file'
+  /** У файла — пустая строка */
   text: string
   status: MessageStatus
   /** Для входящих: отправлена ли квитанция «прочитано» */
   readSent?: boolean
+  file?: FileInfo
+  /**
+   * Незаконченная передача файла: 'up' — ещё не загружен на сервер, 'down' — ещё не скачан.
+   * По этому полю (индекс byTransfer) передачи возобновляются после перезапуска.
+   */
+  transfer?: 'up' | 'down'
+}
+
+export interface FileInfo {
+  name: string
+  mime: string
+  /** Размер исходного файла */
+  size: number
+  /** id зашифрованного файла на сервере */
+  blob: string
+  /** Ключ шифрования файла, base64url */
+  key: string
+  /**
+   * ready — файл есть в базе (таблица files); loading — скачивается;
+   * error — скачать или расшифровать не удалось, можно повторить; gone — на сервере его уже нет.
+   */
+  state: 'ready' | 'loading' | 'error' | 'gone'
+}
+
+/** Содержимое файла. Ключ — id сообщения. */
+export interface StoredFile {
+  id: string
+  data: ArrayBuffer
 }
 
 export interface StoredSession {
@@ -83,22 +112,30 @@ interface Schema extends DBSchema {
   contacts: { key: string; value: Contact; indexes: { byMyMailbox: string } }
   conversations: { key: string; value: Conversation }
   sessions: { key: string; value: StoredSession }
-  messages: { key: string; value: Message; indexes: { byConvTs: [string, number] } }
+  messages: { key: string; value: Message; indexes: { byConvTs: [string, number]; byTransfer: string } }
+  files: { key: string; value: StoredFile }
   outbox: { key: string; value: OutboxItem; indexes: { byCreated: number } }
 }
 
 export type DB = IDBPDatabase<Schema>
 
 export function openStore(): Promise<DB> {
-  return openDB<Schema>(DB_NAME, 1, {
-    upgrade(db) {
-      db.createObjectStore('meta')
-      db.createObjectStore('invites', { keyPath: 'mailbox' })
-      db.createObjectStore('contacts', { keyPath: 'id' }).createIndex('byMyMailbox', 'myMailbox', { unique: true })
-      db.createObjectStore('conversations', { keyPath: 'id' })
-      db.createObjectStore('sessions', { keyPath: 'contactId' })
-      db.createObjectStore('messages', { keyPath: 'id' }).createIndex('byConvTs', ['conv', 'ts'])
-      db.createObjectStore('outbox', { keyPath: 'id' }).createIndex('byCreated', 'createdAt')
+  return openDB<Schema>(DB_NAME, 2, {
+    upgrade(db, oldVersion, _newVersion, tx) {
+      if (oldVersion < 1) {
+        db.createObjectStore('meta')
+        db.createObjectStore('invites', { keyPath: 'mailbox' })
+        db.createObjectStore('contacts', { keyPath: 'id' }).createIndex('byMyMailbox', 'myMailbox', { unique: true })
+        db.createObjectStore('conversations', { keyPath: 'id' })
+        db.createObjectStore('sessions', { keyPath: 'contactId' })
+        db.createObjectStore('messages', { keyPath: 'id' }).createIndex('byConvTs', ['conv', 'ts'])
+        db.createObjectStore('outbox', { keyPath: 'id' }).createIndex('byCreated', 'createdAt')
+      }
+      if (oldVersion < 2) {
+        // Файлы
+        tx.objectStore('messages').createIndex('byTransfer', 'transfer')
+        db.createObjectStore('files', { keyPath: 'id' })
+      }
     },
     blocking() {
       // Другая вкладка хочет удалить/обновить базу — уступаем

@@ -22,7 +22,7 @@ def mailbox() -> str:
 
 @pytest.fixture
 def client(tmp_path):
-    app = create_app(Settings(db_path=str(tmp_path / "t.sqlite3")))
+    app = create_app(Settings(db_path=str(tmp_path / "t.sqlite3"), blob_dir=str(tmp_path / "blobs")))
     with TestClient(app) as c, contextlib.ExitStack() as stack:
         c.stack = stack  # все открытые в тесте сокеты закроются до остановки приложения
         yield c

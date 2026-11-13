@@ -8,6 +8,7 @@ After=network.target
 [Service]
 WorkingDirectory=%h/temp-messenger/server
 Environment=TM_DB_PATH=%h/temp-messenger/data/relay.sqlite3
+Environment=TM_BLOB_DIR=%h/temp-messenger/data/blobs
 ExecStart=%h/temp-messenger/server/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8100 --ws-max-size 131072 --no-access-log
 Restart=always
 RestartSec=3

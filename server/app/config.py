@@ -24,6 +24,16 @@ class Settings:
     rate_burst: int = _int("TM_RATE_BURST", 200)
     cleanup_interval_sec: int = _int("TM_CLEANUP_INTERVAL_SEC", 600)
     auth_timeout_sec: int = _int("TM_AUTH_TIMEOUT_SEC", 15)
+    # Файлы: зашифрованные клиентом, лежат на диске до скачивания всеми получателями или до TTL
+    blob_dir: str = os.environ.get("TM_BLOB_DIR", "blobs")
+    # Шифротекст файла: клиент пускает файлы до 25 МиБ, дополнение и тег добавляют меньше 1 МиБ
+    max_blob_bytes: int = _int("TM_MAX_BLOB_BYTES", 26 * 1024 * 1024)
+    blob_ttl_sec: int = _int("TM_BLOB_TTL_SEC", 7 * 24 * 3600)
+    # Сколько места могут занять файлы одного ключа доступа и все вместе
+    blob_quota_per_owner: int = _int("TM_BLOB_QUOTA_PER_OWNER", 256 * 1024 * 1024)
+    blob_quota_total: int = _int("TM_BLOB_QUOTA_TOTAL", 2 * 1024 * 1024 * 1024)
+    # Сколько ждать окончания начатой загрузки, прежде чем считать её брошенной
+    blob_upload_timeout_sec: int = _int("TM_BLOB_UPLOAD_TIMEOUT_SEC", 3600)
 
 
 settings = Settings()

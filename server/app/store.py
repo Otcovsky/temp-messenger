@@ -28,6 +28,19 @@ CREATE TABLE IF NOT EXISTS messages (
     PRIMARY KEY (mailbox_id, id)
 );
 CREATE INDEX IF NOT EXISTS messages_expires ON messages(expires_at);
+
+-- Зашифрованные файлы. Сами байты лежат на диске, здесь — учёт.
+CREATE TABLE IF NOT EXISTS blobs (
+    id          TEXT PRIMARY KEY,
+    owner       TEXT NOT NULL,          -- ключ доступа загрузившего (для квоты)
+    size        INTEGER NOT NULL,
+    remaining   INTEGER NOT NULL,       -- сколько получателей ещё не скачали
+    complete    INTEGER NOT NULL,       -- 0: загрузка идёт, 1: файл целиком на диске
+    created_at  INTEGER NOT NULL,
+    expires_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS blobs_expires ON blobs(expires_at);
+CREATE INDEX IF NOT EXISTS blobs_owner ON blobs(owner);
 """
 
 
@@ -139,6 +152,86 @@ class Store:
             f"DELETE FROM messages WHERE mailbox_id=? AND id IN ({marks})", (mailbox_id, *ids)
         )
         return cur.rowcount
+
+    # --- файлы ----------------------------------------------------------
+    # Порядок работы: blob_reserve → (запись на диск) → blob_complete или blob_abort.
+    # Место резервируется до записи, поэтому квота учитывает и идущие загрузки.
+
+    def blob_reserve(
+        self,
+        blob_id: str,
+        owner: str,
+        size: int,
+        recipients: int,
+        upload_timeout: int,
+        quota_owner: int,
+        quota_total: int,
+        now: int | None = None,
+    ) -> str:
+        """Возвращает 'ok' (можно писать), 'exists' (этот же файл уже загружен),
+        'busy' (загрузка уже идёт), 'conflict' (id занят другим) или 'quota'."""
+        now = now or int(time.time())
+        row = self.db.execute(
+            "SELECT owner, size, complete, expires_at FROM blobs WHERE id=?", (blob_id,)
+        ).fetchone()
+        if row is not None and row[3] > now:
+            if row[0] != owner or row[1] != size:
+                return "conflict"
+            return "exists" if row[2] else "busy"
+        if row is not None:  # истёк, но уборка ещё не дошла
+            self.db.execute("DELETE FROM blobs WHERE id=?", (blob_id,))
+        (used_owner,) = self.db.execute(
+            "SELECT COALESCE(SUM(size), 0) FROM blobs WHERE owner=? AND expires_at>?", (owner, now)
+        ).fetchone()
+        (used_total,) = self.db.execute(
+            "SELECT COALESCE(SUM(size), 0) FROM blobs WHERE expires_at>?", (now,)
+        ).fetchone()
+        if used_owner + size > quota_owner or used_total + size > quota_total:
+            return "quota"
+        self.db.execute(
+            "INSERT INTO blobs(id, owner, size, remaining, complete, created_at, expires_at) "
+            "VALUES (?,?,?,?,0,?,?)",
+            (blob_id, owner, size, recipients, now, now + upload_timeout),
+        )
+        return "ok"
+
+    def blob_complete(self, blob_id: str, ttl: int, now: int | None = None) -> None:
+        now = now or int(time.time())
+        self.db.execute(
+            "UPDATE blobs SET complete=1, created_at=?, expires_at=? WHERE id=?", (now, now + ttl, blob_id)
+        )
+
+    def blob_abort(self, blob_id: str) -> None:
+        self.db.execute("DELETE FROM blobs WHERE id=? AND complete=0", (blob_id,))
+
+    def blob_available(self, blob_id: str, now: int | None = None) -> bool:
+        now = now or int(time.time())
+        return (
+            self.db.execute(
+                "SELECT 1 FROM blobs WHERE id=? AND complete=1 AND expires_at>?", (blob_id, now)
+            ).fetchone()
+            is not None
+        )
+
+    def blob_done(self, blob_id: str) -> bool:
+        """Получатель скачал файл. True — скачали все, запись удалена и файл пора стереть."""
+        cur = self.db.execute(
+            "UPDATE blobs SET remaining=remaining-1 WHERE id=? AND complete=1 AND remaining>0", (blob_id,)
+        )
+        if not cur.rowcount:
+            return False
+        return self.db.execute("DELETE FROM blobs WHERE id=? AND remaining<=0", (blob_id,)).rowcount > 0
+
+    def blob_expired(self, now: int | None = None) -> list[str]:
+        """Удалить истёкшие записи (и брошенные загрузки). Возвращает их id, чтобы стереть файлы."""
+        now = now or int(time.time())
+        ids = [r[0] for r in self.db.execute("SELECT id FROM blobs WHERE expires_at<=?", (now,))]
+        if ids:
+            self.db.execute("DELETE FROM blobs WHERE expires_at<=?", (now,))
+        return ids
+
+    def blob_ids(self) -> set[str]:
+        return {r[0] for r in self.db.execute("SELECT id FROM blobs")}
 
     # --- уборка ----------------------------------------------------------
 

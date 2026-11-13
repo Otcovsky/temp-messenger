@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { Message } from '../storage/db'
+import { FileMessage } from './FileMessage'
 import { formatDay } from './format'
 import { useLive, useMessenger } from './hooks'
 import { Modal } from './Modal'
@@ -12,14 +13,20 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
   const [text, setText] = useState('')
   const [info, setInfo] = useState(false)
   const [error, setError] = useState('')
+  const [dragging, setDragging] = useState(false)
   const listRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+  /** Список прокручен до конца: тогда новые сообщения и подгрузившиеся картинки его не сдвигают вверх */
+  const atBottom = useRef(true)
   const count = messages?.length ?? 0
 
-  useLayoutEffect(() => {
+  const scrollToEnd = () => {
     const el = listRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [count])
+  }
+
+  useLayoutEffect(scrollToEnd, [count])
 
   useEffect(() => {
     // Новое сообщение пришло, пока чат открыт
@@ -39,13 +46,41 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
     inputRef.current?.focus()
   }
 
+  const sendFiles = async (files: Iterable<File>) => {
+    setError('')
+    for (const f of files) {
+      try {
+        await m.sendFile(convId, f)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+      }
+    }
+  }
+
   if (contact === undefined && messages === undefined) return <section className="chat" />
   if (!contact) return <section className="chat empty"><p>Чат удалён.</p></section>
 
   const canWrite = !contact.gone && !!contact.theirMailbox
+  const hasFiles = (e: React.DragEvent) => canWrite && e.dataTransfer.types.includes('Files')
 
   return (
-    <section className="chat">
+    <section
+      className={dragging ? 'chat dragging' : 'chat'}
+      onDragOver={(e) => {
+        if (!hasFiles(e)) return
+        e.preventDefault()
+        setDragging(true)
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false)
+      }}
+      onDrop={(e) => {
+        setDragging(false)
+        if (!hasFiles(e)) return
+        e.preventDefault()
+        void sendFiles(e.dataTransfer.files)
+      }}
+    >
       <header className="chat-head">
         <button className="icon back" onClick={onBack} aria-label="Назад">
           ←
@@ -57,14 +92,27 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
         </button>
       </header>
 
-      <div className="messages" ref={listRef}>
+      <div
+        className="messages"
+        ref={listRef}
+        onScroll={(e) => {
+          const el = e.currentTarget
+          atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40
+        }}
+      >
         {messages?.length === 0 && (
           <p className="muted center small">
             Чат создан. Сообщения шифруются в браузере и расшифровываются только у собеседника.
           </p>
         )}
         {messages?.map((msg, i) => (
-          <MessageRow key={msg.id} msg={msg} prev={messages[i - 1]} onRetry={() => m.retry(msg.id)} />
+          <MessageRow
+            key={msg.id}
+            msg={msg}
+            prev={messages[i - 1]}
+            onRetry={() => void m.retry(msg.id).catch((e) => setError(e instanceof Error ? e.message : String(e)))}
+            onMediaLoad={() => atBottom.current && scrollToEnd()}
+          />
         ))}
       </div>
 
@@ -78,6 +126,27 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
           void send()
         }}
       >
+        <input
+          ref={fileRef}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            const files = [...(e.target.files ?? [])]
+            e.target.value = '' // чтобы тот же файл можно было выбрать снова
+            void sendFiles(files)
+          }}
+        />
+        <button
+          type="button"
+          className="icon attach"
+          disabled={!canWrite}
+          onClick={() => fileRef.current?.click()}
+          aria-label="Прикрепить файл"
+          title="Прикрепить файл"
+        >
+          📎
+        </button>
         <textarea
           ref={inputRef}
           rows={1}
@@ -85,6 +154,13 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
           disabled={!canWrite}
           placeholder={canWrite ? 'Сообщение' : 'Писать некуда'}
           onChange={(e) => setText(e.target.value)}
+          onPaste={(e) => {
+            // Вставленная картинка или файл из буфера обмена уходит как файл
+            const files = [...e.clipboardData.files]
+            if (!files.length) return
+            e.preventDefault()
+            void sendFiles(files)
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault()
@@ -102,15 +178,29 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
   )
 }
 
-function MessageRow({ msg, prev, onRetry }: { msg: Message; prev?: Message; onRetry: () => void }) {
+function MessageRow({
+  msg,
+  prev,
+  onRetry,
+  onMediaLoad,
+}: {
+  msg: Message
+  prev?: Message
+  onRetry: () => void
+  onMediaLoad: () => void
+}) {
   const mine = msg.from === 'me'
   const newDay = !prev || new Date(prev.ts).toDateString() !== new Date(msg.ts).toDateString()
   return (
     <>
       {newDay && <div className="day">{formatDay(msg.ts)}</div>}
       <div className={mine ? 'msg mine' : 'msg'}>
-        <div className="bubble">
-          <span className="text">{msg.text}</span>
+        <div className={msg.type === 'file' ? 'bubble file' : 'bubble'}>
+          {msg.type === 'file' && msg.file ? (
+            <FileMessage msg={msg} onMediaLoad={onMediaLoad} />
+          ) : (
+            <span className="text">{msg.text}</span>
+          )}
           <span className="meta">
             {new Date(msg.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             {mine && <StatusMark status={msg.status} onRetry={onRetry} />}
