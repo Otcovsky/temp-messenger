@@ -273,7 +273,13 @@ def _mailbox(value) -> str:
 
 
 def _ref(frame) -> str | None:
-    return frame.get("id") if isinstance(frame, dict) and isinstance(frame.get("id"), str) else None
+    """К чему относится ошибка: id сообщения (send) или ящик (register, probe, ...)."""
+    if not isinstance(frame, dict):
+        return None
+    for key in ("id", "mailbox"):
+        if isinstance(frame.get(key), str):
+            return frame[key]
+    return None
 
 
 logging.basicConfig(level=logging.INFO)

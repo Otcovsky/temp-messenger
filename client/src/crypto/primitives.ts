@@ -37,6 +37,8 @@ let detected: Promise<void> | null = null
  * не всегда (structured clone для CryptoKey X25519/Ed25519 поддержан не везде), и тогда
  * запись приглашения или сессии падала бы уже посреди работы.
  */
+export const KEY_PROBE_DB = 'tm-key-probe'
+
 async function roundTrip(key: CryptoKey): Promise<CryptoKey> {
   if (typeof indexedDB === 'undefined') return key // тесты в Node
   const req = (r: IDBRequest) =>
@@ -44,7 +46,7 @@ async function roundTrip(key: CryptoKey): Promise<CryptoKey> {
       r.onsuccess = () => resolve(r.result)
       r.onerror = () => reject(r.error)
     })
-  const open = indexedDB.open('tm-key-probe', 1)
+  const open = indexedDB.open(KEY_PROBE_DB, 1)
   open.onupgradeneeded = () => open.result.createObjectStore('k')
   const db = (await req(open)) as IDBDatabase
   try {
@@ -54,6 +56,9 @@ async function roundTrip(key: CryptoKey): Promise<CryptoKey> {
     return back
   } finally {
     db.close()
+    // Проба одноразовая: не оставляем базу с тестовым ключом. Следующее open() браузер
+    // поставит в очередь после удаления, так что ждать его не нужно.
+    indexedDB.deleteDatabase(KEY_PROBE_DB)
   }
 }
 

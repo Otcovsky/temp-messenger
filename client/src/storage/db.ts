@@ -4,7 +4,7 @@
  */
 import { type DBSchema, type IDBPDatabase, type IDBPTransaction, type StoreNames, deleteDB, openDB } from 'idb'
 import type { Identity, PendingInvite, PreKeyHeader } from '../crypto/handshake'
-import type { KeyPair } from '../crypto/primitives'
+import { type KeyPair, KEY_PROBE_DB } from '../crypto/primitives'
 import type { RatchetState } from '../crypto/ratchet'
 
 export const DB_NAME = 'temp-messenger'
@@ -104,6 +104,7 @@ export function openStore(): Promise<DB> {
 export async function wipeStore(db: DB | null): Promise<void> {
   db?.close()
   await deleteDB(DB_NAME)
+  await deleteDB(KEY_PROBE_DB).catch(() => {}) // след проверки ключей в старых версиях
   try {
     localStorage.clear()
   } catch {
@@ -150,6 +151,27 @@ export async function saveAccount(db: DB, identity: Identity, auth: KeyPair, pro
     return [meta.put(identity, 'identity'), meta.put(auth, 'auth'), meta.put(profile, 'profile')]
   })
 }
+
+// --- ящики, которые надо закрыть на сервере ----------------------------------
+// Хранятся, пока сервер не ответит unregistered: без связи закроем при следующем подключении.
+
+const UNREGISTER = 'unregister'
+
+export async function pendingUnregisters(db: DB): Promise<string[]> {
+  return ((await db.get('meta', UNREGISTER)) as string[] | undefined) ?? []
+}
+
+async function editUnregisters(db: DB, fn: (list: string[]) => string[]): Promise<void> {
+  const tx = db.transaction('meta', 'readwrite')
+  const list = ((await tx.store.get(UNREGISTER)) as string[] | undefined) ?? []
+  await Promise.all([tx.store.put(fn(list), UNREGISTER), tx.done])
+}
+
+export const queueUnregister = (db: DB, mailbox: string) =>
+  editUnregisters(db, (list) => (list.includes(mailbox) ? list : [...list, mailbox]))
+
+export const dequeueUnregister = (db: DB, mailbox: string) =>
+  editUnregisters(db, (list) => list.filter((mb) => mb !== mailbox))
 
 /** Все мои ящики: незакрытые приглашения + ящики контактов. */
 export async function allMailboxes(db: DB): Promise<string[]> {

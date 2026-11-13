@@ -6,13 +6,22 @@ export function Onboarding({ hasInvite }: { hasInvite: boolean }) {
   const m = useMessenger()
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!name.trim()) return
     setBusy(true)
-    await m.createAccount(name)
-    m.start()
+    setError('')
+    try {
+      await m.createAccount(name)
+      m.start()
+    } catch (err) {
+      // Раньше кнопка навсегда оставалась в «Создаю ключи…» без объяснений
+      console.error('Не удалось создать аккаунт', err)
+      setError(`Не удалось создать ключи: ${err instanceof Error ? err.message : String(err)}`)
+      setBusy(false)
+    }
   }
 
   return (
@@ -36,6 +45,7 @@ export function Onboarding({ hasInvite }: { hasInvite: boolean }) {
         <button className="primary" disabled={busy || !name.trim()}>
           {busy ? 'Создаю ключи…' : 'Начать'}
         </button>
+        {error && <p className="error">{error}</p>}
       </form>
     </div>
   )

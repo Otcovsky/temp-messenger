@@ -87,7 +87,7 @@ B запускает Double Ratchet как отправитель, `E_A` — п�
 ← msg {id, mailbox, payload, ts}
 → ack {mailbox, ids:[...]}        сервер удаляет сообщения
 → ping                            ← pong
-← error {code, ref?}
+← error {code, ref?}                ref — id сообщения (send) или ящик (register, probe, unregister, ack)
 ```
 
 Перед принятием приглашения клиент спрашивает `probe`: чат создаётся, только если `state = "open"`.

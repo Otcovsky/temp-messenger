@@ -33,7 +33,10 @@ import {
   listConversations,
   listMessages,
   mailboxRegistrations,
+  dequeueUnregister,
   openStore,
+  pendingUnregisters,
+  queueUnregister,
   saveAccount,
   wipeStore,
   writeAll,
@@ -48,6 +51,21 @@ const REGISTER_TIMEOUT_MS = 8_000
 /** Сколько id уже обработанных входящих помнить, чтобы не разбирать повторную доставку */
 const HANDLED_MAX = 2_000
 const NO_CONNECTION = 'Нет связи с сервером. Попробуйте ещё раз, когда связь появится.'
+const NO_ANSWER = 'Сервер не ответил. Проверьте связь и попробуйте ещё раз.'
+
+/** Понятный текст для отказа сервера (кадр error) на register или probe. */
+function serverRefusal(code: string): string {
+  switch (code) {
+    case 'too_many_mailboxes':
+      return 'Слишком много открытых приглашений и чатов. Отзовите ненужные приглашения и попробуйте снова.'
+    case 'rate_limited':
+      return 'Слишком много запросов к серверу. Подождите немного и попробуйте снова.'
+    case 'forbidden':
+      return 'Сервер не принял ящик для приглашения. Попробуйте создать ссылку ещё раз.'
+    default:
+      return `Сервер отклонил запрос (${code}). Попробуйте ещё раз.`
+  }
+}
 
 const STATUS_RANK: Record<MessageStatus, number> = {
   failed: -1, pending: 0, sent: 1, delivered: 2, read: 3, received: 0,
@@ -63,8 +81,11 @@ export class Messenger {
   private inFlight = new Set<string>()
   private listeners = new Set<() => void>()
   private activeConv: string | null = null
-  private probes = new Map<string, ((s: InviteState) => void)[]>()
-  private registerWaiters = new Map<string, (() => void)[]>()
+  /** Ждут ответа probe / registered по ящику */
+  private probes = new Waiters<InviteState>()
+  private registers = new Waiters<void>()
+  /** Проверка базы при запуске: onReady ждёт её, чтобы не регистрировать ящики удаляемых контактов */
+  private repaired: Promise<void> = Promise.resolve()
   /**
    * Id входящих, уже взятых в работу. Сервер может прислать сообщение повторно (например,
    * после перерегистрации ящика, пока ack ещё не дошёл), а повторная расшифровка уже
@@ -121,12 +142,18 @@ export class Messenger {
 
   start(url = defaultServerUrl()): void {
     if (!this.auth || this.transport) return
+    this.repaired = this.repair().catch((e) => console.warn('Не удалось проверить базу', e))
     this.transport = new Transport(url, this.auth, {
-      onReady: () => this.onReady(),
+      onReady: () => void this.onReady().catch((e) => console.warn('Не удалось восстановить ящики', e)),
       onFrame: (f) => this.onFrame(f),
       onStatus: (s) => {
         this.status = s
-        if (s !== 'online') this.inFlight.clear()
+        if (s !== 'online') {
+          this.inFlight.clear()
+          // Ответа по разорванному соединению уже не будет — не держим человека до таймаута
+          this.probes.rejectAll(new Error(NO_CONNECTION))
+          this.registers.rejectAll(new Error(NO_CONNECTION))
+        }
         this.emit()
       },
     })
@@ -134,8 +161,7 @@ export class Messenger {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && this.activeConv) void this.markRead(this.activeConv)
     })
-    void this.dropExpiredInvites()
-    void this.repair().catch((e) => console.warn('Не удалось проверить базу', e))
+    void this.dropExpiredInvites().catch((e) => console.warn('Не удалось убрать старые приглашения', e))
   }
 
   /**
@@ -150,11 +176,20 @@ export class Messenger {
         await this.db.put('conversations', newConversation(c))
       } else {
         await this.db.delete('contacts', c.id)
-        this.transport?.send({ t: 'unregister', mailbox: c.myMailbox })
+        await this.closeMailbox(c.myMailbox)
       }
       changed = true
     }
     if (changed) this.emit()
+  }
+
+  /**
+   * Закрыть свой ящик на сервере. Ящик запоминается в базе, пока сервер не ответит
+   * unregistered: без связи (или если кадр потеряется) закроем при следующем подключении.
+   */
+  private async closeMailbox(mailbox: string) {
+    await queueUnregister(this.db, mailbox)
+    this.transport?.send({ t: 'unregister', mailbox })
   }
 
   /** Удалить всё: сообщить собеседникам, закрыть ящики на сервере, стереть базу. */
@@ -164,7 +199,8 @@ export class Messenger {
       await Promise.all(contacts.map((c) => this.sendGoodbye(c).catch(() => {})))
       await this.flushOutbox()
       await new Promise((r) => setTimeout(r, 1500))
-      for (const mb of await allMailboxes(this.db)) this.transport?.send({ t: 'unregister', mailbox: mb })
+      const mailboxes = [...(await allMailboxes(this.db)), ...(await pendingUnregisters(this.db))]
+      for (const mb of mailboxes) this.transport?.send({ t: 'unregister', mailbox: mb })
       await new Promise((r) => setTimeout(r, 300))
     } finally {
       this.transport?.stop()
@@ -175,7 +211,9 @@ export class Messenger {
   // --- сеть ----------------------------------------------------------------
 
   private async onReady() {
-    for (const r of await mailboxRegistrations(this.db)) this.transport!.send({ t: 'register', ...r })
+    await this.repaired
+    for (const r of await mailboxRegistrations(this.db)) this.transport?.send({ t: 'register', ...r })
+    for (const mailbox of await pendingUnregisters(this.db)) this.transport?.send({ t: 'unregister', mailbox })
     await this.flushOutbox()
   }
 
@@ -195,21 +233,21 @@ export class Messenger {
       case 'sent':
         void this.onSent(f.id, f.failed)
         break
-      case 'registered': {
-        const waiting = this.registerWaiters.get(f.mailbox)
-        this.registerWaiters.delete(f.mailbox)
-        waiting?.forEach((fn) => fn())
+      case 'registered':
+        this.registers.resolve(f.mailbox, undefined)
         break
-      }
-      case 'probe': {
-        const waiting = this.probes.get(f.mailbox)
-        this.probes.delete(f.mailbox)
-        waiting?.forEach((fn) => fn(f.state))
+      case 'unregistered':
+        void dequeueUnregister(this.db, f.mailbox).catch((e) => console.warn('Не удалось обновить базу', e))
         break
-      }
+      case 'probe':
+        this.probes.resolve(f.mailbox, f.state)
+        break
       case 'error':
         console.warn('Ошибка сервера:', f.code, f.ref ?? '')
-        if (f.ref && this.inFlight.delete(f.ref)) setTimeout(() => void this.flushOutbox(), 3000)
+        if (!f.ref) break
+        if (this.inFlight.delete(f.ref)) setTimeout(() => void this.flushOutbox(), 3000)
+        this.registers.reject(f.ref, new Error(serverRefusal(f.code)))
+        this.probes.reject(f.ref, new Error(serverRefusal(f.code)))
         break
     }
   }
@@ -254,39 +292,27 @@ export class Messenger {
     const inv = await createInviteCrypto(this.identity!, this.profile!.name)
     await this.db.put('invites', inv)
     try {
-      await this.registerConfirmed(inv.mailbox, true)
+      await this.registers.wait(inv.mailbox, REGISTER_TIMEOUT_MS, () => this.noAnswer(), () =>
+        this.send({ t: 'register', mailbox: inv.mailbox, invite: true }),
+      )
     } catch (e) {
       await this.db.delete('invites', inv.mailbox)
+      // Регистрация могла дойти до сервера, а потерялся только ответ — закрываем ящик там
+      await this.closeMailbox(inv.mailbox).catch(() => {})
       throw e
     }
     this.emit()
     return inv
   }
 
-  /** Зарегистрировать ящик и дождаться подтверждения сервера. */
-  private registerConfirmed(mailbox: string, invite: boolean): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const forget = () => {
-        const rest = (this.registerWaiters.get(mailbox) ?? []).filter((fn) => fn !== done)
-        if (rest.length) this.registerWaiters.set(mailbox, rest)
-        else this.registerWaiters.delete(mailbox)
-      }
-      const timer = setTimeout(() => {
-        forget()
-        this.transport?.checkAlive()
-        reject(new Error('Сервер не ответил. Проверьте связь и попробуйте ещё раз.'))
-      }, REGISTER_TIMEOUT_MS)
-      const done = () => {
-        clearTimeout(timer)
-        resolve()
-      }
-      this.registerWaiters.set(mailbox, [...(this.registerWaiters.get(mailbox) ?? []), done])
-      if (!this.transport?.send({ t: 'register', mailbox, invite })) {
-        clearTimeout(timer)
-        forget()
-        reject(new Error(NO_CONNECTION))
-      }
-    })
+  private send(frame: object): boolean {
+    return !!this.transport?.send(frame)
+  }
+
+  /** Сервер молчит: проверить, живо ли соединение, и вернуть ошибку для человека. */
+  private noAnswer(): Error {
+    this.transport?.checkAlive()
+    return new Error(NO_ANSWER)
   }
 
   listInvites(): Promise<PendingInvite[]> {
@@ -295,7 +321,7 @@ export class Messenger {
 
   async cancelInvite(mailbox: string): Promise<void> {
     await this.db.delete('invites', mailbox)
-    this.transport?.send({ t: 'unregister', mailbox })
+    await this.closeMailbox(mailbox)
     this.emit()
   }
 
@@ -322,20 +348,10 @@ export class Messenger {
   /** Спросить сервер, ждёт ли ещё ящик-приглашение ответа. */
   private async probeInvite(mailbox: string): Promise<InviteState> {
     const deadline = Date.now() + PROBE_TIMEOUT_MS
-    if (!(await this.waitOnline(PROBE_TIMEOUT_MS))) throw new Error('Нет связи с сервером. Попробуйте ещё раз позже.')
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.probes.delete(mailbox)
-        reject(new Error('Сервер не ответил. Попробуйте ещё раз.'))
-      }, Math.max(1000, deadline - Date.now()))
-      const list = this.probes.get(mailbox) ?? []
-      list.push((s) => {
-        clearTimeout(timer)
-        resolve(s)
-      })
-      this.probes.set(mailbox, list)
-      this.transport!.send({ t: 'probe', mailbox })
-    })
+    if (!(await this.waitOnline(PROBE_TIMEOUT_MS))) throw new Error(NO_CONNECTION)
+    return this.probes.wait(mailbox, Math.max(1000, deadline - Date.now()), () => this.noAnswer(), () =>
+      this.send({ t: 'probe', mailbox }),
+    )
   }
 
   /** Живая беседа, уже созданная по этому приглашению (если ссылку открыли повторно). */
@@ -553,10 +569,7 @@ export class Messenger {
 
   async deleteConversation(convId: string): Promise<void> {
     const contact = await this.db.get('contacts', convId)
-    if (contact) {
-      await this.sendGoodbye(contact).catch(() => {})
-      this.transport?.send({ t: 'unregister', mailbox: contact.myMailbox })
-    }
+    if (contact) await this.sendGoodbye(contact).catch(() => {})
     const msgs = await listMessages(this.db, convId)
     await writeAll(this.db, ['contacts', 'sessions', 'conversations', 'messages'], (tx) => [
       tx.objectStore('contacts').delete(convId),
@@ -564,6 +577,8 @@ export class Messenger {
       tx.objectStore('conversations').delete(convId),
       ...msgs.map((m) => tx.objectStore('messages').delete(m.id)),
     ])
+    // Ящик закрываем после удаления: если запись не удалась, чат остаётся рабочим
+    if (contact) await this.closeMailbox(contact.myMailbox)
     this.emit()
   }
 
@@ -592,6 +607,65 @@ export class Messenger {
   async safetyNumber(contactId: string): Promise<string | null> {
     const c = await this.db.get('contacts', contactId)
     return c ? safetyNumber(this.identity!.dh.pub, b64d(c.ik)) : null
+  }
+}
+
+type Waiter<T> = { resolve: (v: T) => void; reject: (e: Error) => void }
+
+/** Запросы к серверу, ждущие ответа по ящику (probe, register). */
+class Waiters<T> {
+  private map = new Map<string, Waiter<T>[]>()
+
+  /**
+   * Отправить запрос (send) и ждать, пока ответ не придёт через resolve/reject.
+   * Не дождались за ms — отказ с ошибкой из onTimeout. send вернул false — сразу «нет связи».
+   */
+  wait(key: string, ms: number, onTimeout: () => Error, send: () => boolean): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.remove(key, w)
+        reject(onTimeout())
+      }, ms)
+      const w: Waiter<T> = {
+        resolve: (v) => {
+          clearTimeout(timer)
+          resolve(v)
+        },
+        reject: (e) => {
+          clearTimeout(timer)
+          reject(e)
+        },
+      }
+      this.map.set(key, [...(this.map.get(key) ?? []), w])
+      if (!send()) {
+        this.remove(key, w)
+        w.reject(new Error(NO_CONNECTION))
+      }
+    })
+  }
+
+  resolve(key: string, v: T): void {
+    this.take(key).forEach((w) => w.resolve(v))
+  }
+
+  reject(key: string, e: Error): void {
+    this.take(key).forEach((w) => w.reject(e))
+  }
+
+  rejectAll(e: Error): void {
+    for (const key of [...this.map.keys()]) this.reject(key, e)
+  }
+
+  private take(key: string): Waiter<T>[] {
+    const list = this.map.get(key) ?? []
+    this.map.delete(key)
+    return list
+  }
+
+  private remove(key: string, w: Waiter<T>) {
+    const rest = (this.map.get(key) ?? []).filter((x) => x !== w)
+    if (rest.length) this.map.set(key, rest)
+    else this.map.delete(key)
   }
 }
 
