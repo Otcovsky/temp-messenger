@@ -114,6 +114,15 @@ class Hub:
                 pass
 
 
+def read_version(path: str) -> str:
+    """Хеш коммита, записанный deploy.sh; при локальном запуске файла нет — "dev"."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read().strip() or "dev"
+    except OSError:
+        return "dev"
+
+
 def create_app(cfg: Settings = default_settings) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -141,10 +150,11 @@ def create_app(cfg: Settings = default_settings) -> FastAPI:
             await asyncio.sleep(cfg.cleanup_interval_sec)
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+    version = read_version(cfg.version_file)
 
     @app.get("/health")
     async def health():
-        return {"ok": True}
+        return {"ok": True, "version": version}
 
     add_blob_routes(app, cfg)
 

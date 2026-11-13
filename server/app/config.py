@@ -34,6 +34,8 @@ class Settings:
     blob_quota_total: int = _int("TM_BLOB_QUOTA_TOTAL", 2 * 1024 * 1024 * 1024)
     # Сколько ждать окончания начатой загрузки, прежде чем считать её брошенной
     blob_upload_timeout_sec: int = _int("TM_BLOB_UPLOAD_TIMEOUT_SEC", 3600)
+    # Файл с версией (хешем коммита), его пишет deploy/deploy.sh; путь относительно рабочего каталога
+    version_file: str = os.environ.get("TM_VERSION_FILE", "VERSION")
 
 
 settings = Settings()

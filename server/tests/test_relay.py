@@ -160,3 +160,14 @@ def test_store_migrates_old_schema(tmp_path):
     store = Store(path)
     assert store.invite_state("legacy") == "open"
     store.close()
+
+
+def test_health_reports_version(tmp_path):
+    vf = tmp_path / "VERSION"
+    vf.write_text("abc1234\n")
+    cfg = Settings(db_path=str(tmp_path / "t.sqlite3"), blob_dir=str(tmp_path / "blobs"), version_file=str(vf))
+    with TestClient(create_app(cfg)) as c:
+        assert c.get("/health").json() == {"ok": True, "version": "abc1234"}
+    cfg = Settings(db_path=str(tmp_path / "t.sqlite3"), blob_dir=str(tmp_path / "blobs"), version_file=str(tmp_path / "nope"))
+    with TestClient(create_app(cfg)) as c:
+        assert c.get("/health").json() == {"ok": True, "version": "dev"}

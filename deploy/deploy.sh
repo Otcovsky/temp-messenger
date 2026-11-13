@@ -9,6 +9,12 @@ REMOTE="${DEPLOY_DIR:-temp-messenger}"   # относительно домашн
 
 cd "$(dirname "$0")/.."
 
+# Версия = короткий хеш коммита; "-dirty", если выкладываются незакоммиченные правки.
+# Relay читает её из server/VERSION при старте и отдаёт в /health.
+VERSION="$(git rev-parse --short HEAD)"
+[ -z "$(git status --porcelain -- client server deploy)" ] || VERSION="$VERSION-dirty"
+echo "==> Версия $VERSION"
+
 echo "==> Сборка клиента"
 npm --prefix client run build
 
@@ -22,6 +28,7 @@ tar --exclude=__pycache__ -czf - server/app server/requirements.txt deploy/temp-
   cd $REMOTE
   rm -rf server/app
   tar -xzf -
+  echo '$VERSION' > server/VERSION
   [ -x server/.venv/bin/python ] || python3 -m venv server/.venv
   server/.venv/bin/pip install -q --upgrade pip
   server/.venv/bin/pip install -q -r server/requirements.txt
@@ -39,4 +46,4 @@ tar --exclude=__pycache__ -czf - server/app server/requirements.txt deploy/temp-
   systemctl --user is-active temp-messenger
 "
 echo
-echo "==> Готово"
+echo "==> Готово, на сервере $VERSION"
