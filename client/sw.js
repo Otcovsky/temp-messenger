@@ -37,12 +37,17 @@ self.addEventListener('message', (event) => {
  * Показывать уведомление нужно на каждый пуш: иначе Safari и Chrome отзывают подписку.
  * Если приложение уже на экране, уведомление беззвучное и сразу убирается. */
 const PUSH_TAG = 'tm-msg'
+/**
+ * Обработчик события не должен висеть: пока у worker'а есть незавершённое событие, новая версия
+ * не может его сменить. Поэтому ждём работу не дольше нескольких секунд.
+ */
+const bounded = (work) => Promise.race([work.catch(() => {}), new Promise((r) => setTimeout(r, 5000))])
 /** До этого момента идёт проверка уведомлений из настроек: пуш показываем, даже если приложение открыто */
 let testUntil = 0
 
 self.addEventListener('push', (event) => {
   event.waitUntil(
-    (async () => {
+    bounded((async () => {
       const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
       const visible = Date.now() > testUntil && windows.some((c) => c.visibilityState === 'visible')
       await self.registration.showNotification('Temp Messenger', {
@@ -53,18 +58,18 @@ self.addEventListener('push', (event) => {
         silent: visible,
       })
       if (visible) for (const n of await self.registration.getNotifications({ tag: PUSH_TAG })) n.close()
-    })(),
+    })()),
   )
 })
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
   event.waitUntil(
-    (async () => {
+    bounded((async () => {
       const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
       if (windows.length) await windows[0].focus()
       else await self.clients.openWindow('/')
-    })(),
+    })()),
   )
 })
 

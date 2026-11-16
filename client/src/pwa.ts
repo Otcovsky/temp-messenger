@@ -21,6 +21,9 @@ export interface PwaState {
 let state: PwaState = { updateReady: false, canInstall: false, persisted: null }
 const listeners = new Set<() => void>()
 let waiting: ServiceWorker | null = null
+let registration: ServiceWorkerRegistration | null = null
+/** Сколько ждать, что новый worker возьмёт управление, прежде чем обновляться в обход старого */
+const UPDATE_TIMEOUT_MS = 3_000
 let installEvent: BeforeInstallPromptEvent | null = null
 
 function set(patch: Partial<PwaState>) {
@@ -77,6 +80,7 @@ export function initPwa(): void {
   window.addEventListener('load', async () => {
     try {
       const reg = await navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
+      registration = reg
       const track = (w: ServiceWorker | null) => {
         if (!w) return
         const check = () => {
@@ -100,9 +104,23 @@ export function initPwa(): void {
   })
 }
 
-/** Применить скачанное обновление: новый worker активируется, страница перезагрузится */
+/**
+ * Применить скачанное обновление: новый worker активируется, страница перезагрузится.
+ *
+ * Новый worker не может активироваться, пока старый занят незавершённым событием (зависший
+ * запрос, обработка нажатия на уведомление) — тогда нажатие «Обновить» ничего бы не дало.
+ * Поэтому, если управление не сменилось за несколько секунд, снимаем регистрацию целиком и
+ * перезагружаемся: страница придёт из сети уже новой и зарегистрирует worker заново.
+ */
 export function applyUpdate(): void {
   waiting?.postMessage('skipWaiting')
+  setTimeout(async () => {
+    try {
+      await registration?.unregister()
+    } finally {
+      location.reload()
+    }
+  }, UPDATE_TIMEOUT_MS)
 }
 
 /** Показать системный диалог установки (только где браузер его поддерживает) */
