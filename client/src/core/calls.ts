@@ -69,6 +69,10 @@ interface Session {
   remoteCandidates: RTCIceCandidateInit[]
   localCandidates: RTCIceCandidateInit[]
   connectedAt: number | null
+  /** Звук разрешён только через TURN (а не напрямую) */
+  relayOnly: boolean
+  /** TURN-сервер выдал хотя бы один адрес */
+  gotRelay: boolean
   timers: Set<ReturnType<typeof setTimeout>>
   flushTimer?: ReturnType<typeof setTimeout>
   recoverTimer?: ReturnType<typeof setTimeout>
@@ -217,7 +221,7 @@ function newSession(id: string, contact: Contact, mine: boolean): Session {
   const s: Session = {
     id, contactId: contact.id, mine, createdAt: Date.now(), pc: null, local: null, offer: null,
     answered: false, localSent: false, remoteSet: false, remoteCandidates: [], localCandidates: [],
-    connectedAt: null, timers: new Set(),
+    connectedAt: null, relayOnly: false, gotRelay: false, timers: new Set(),
   }
   cur = s
   set({
@@ -248,11 +252,9 @@ async function setupPeer(s: Session): Promise<RTCPeerConnection | null> {
   })
   if (!alive(s)) return null
   const hasTurn = servers.some((x) => !!x.credential)
-  const pc = new RTCPeerConnection({
-    iceServers: servers,
-    // Только через TURN — собеседник не узнает IP. Без TURN выбора нет: иначе не соединиться вовсе
-    iceTransportPolicy: hasTurn && !directAllowed() ? 'relay' : 'all',
-  })
+  // Только через TURN — собеседник не узнает IP. Без TURN выбора нет: иначе не соединиться вовсе
+  s.relayOnly = hasTurn && !directAllowed()
+  const pc = new RTCPeerConnection({ iceServers: servers, iceTransportPolicy: s.relayOnly ? 'relay' : 'all' })
   s.pc = pc
   for (const track of s.local!.getTracks()) pc.addTrack(track, s.local!)
   pc.ontrack = (e) => {
@@ -261,7 +263,9 @@ async function setupPeer(s: Session): Promise<RTCPeerConnection | null> {
     void el.play().catch((err) => console.warn('Звук собеседника не запустился', err))
   }
   pc.onicecandidate = (e) => {
-    if (!e.candidate || !s.localSent) return // до отправки offer/answer адреса едут внутри sdp
+    if (!e.candidate) return
+    if (e.candidate.type === 'relay') s.gotRelay = true
+    if (!s.localSent) return // до отправки offer/answer адреса едут внутри sdp
     s.localCandidates.push(e.candidate.toJSON())
     clearTimeout(s.flushTimer)
     s.flushTimer = setTimeout(() => flushLocalCandidates(s), 150)
@@ -329,7 +333,11 @@ function lost(s: Session) {
   finish(s, {
     outcome: s.connectedAt ? 'answered' : 'failed',
     send: 'failed',
-    note: s.connectedAt ? 'Связь потеряна' : 'Не удалось соединиться',
+    note: s.connectedAt
+      ? 'Связь потеряна'
+      : s.relayOnly && !s.gotRelay
+        ? 'Сервер звонков недоступен из этой сети'
+        : 'Не удалось соединиться',
   })
 }
 
@@ -412,8 +420,10 @@ export async function startCall(contactId: string): Promise<void> {
     await pc.setLocalDescription(await pc.createOffer())
     await gathered(pc)
     if (!alive(s)) return
-    await m.sendCall(contactId, { type: 'call-offer', body: { call: s.id, sdp: pc.localDescription!.sdp } })
+    // Отметка — до await: адреса, найденные, пока предложение уходит, должны уйти следом, а не пропасть
+    const sdp = pc.localDescription!.sdp
     s.localSent = true
+    await m.sendCall(contactId, { type: 'call-offer', body: { call: s.id, sdp } })
   } catch (e) {
     console.warn('Звонок не начался', e)
     return finish(s, { note: 'Не удалось начать звонок' })
@@ -447,8 +457,9 @@ export async function acceptCall(): Promise<void> {
     await pc.setLocalDescription(await pc.createAnswer())
     await gathered(pc)
     if (!alive(s)) return
-    await m.sendCall(s.contactId, { type: 'call-answer', body: { call: s.id, sdp: pc.localDescription!.sdp } })
+    const sdp = pc.localDescription!.sdp
     s.localSent = true
+    await m.sendCall(s.contactId, { type: 'call-answer', body: { call: s.id, sdp } })
   } catch (e) {
     console.warn('Не удалось ответить на звонок', e)
     return finish(s, { outcome: 'failed', send: 'failed', note: 'Не удалось соединиться' })
