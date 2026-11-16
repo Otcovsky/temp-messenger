@@ -118,7 +118,15 @@ export class Messenger {
   /** Id сообщений, чей файл сейчас загружается или скачивается */
   private transfers = new Set<string>()
   /** Слушатель пуш-уведомлений (push.ts): подключение к серверу и ответ сервера на подписку */
-  onPush: ((e: { t: 'ready' } | { t: 'result'; ok: true } | { t: 'result'; ok: false; code: string }) => void) | null = null
+  onPush:
+    | ((
+        e:
+          | { t: 'ready' }
+          | { t: 'result'; ok: true }
+          | { t: 'result'; ok: false; code: string }
+          | { t: 'test'; status: number },
+      ) => void)
+    | null = null
   /** Растёт при каждом изменении — UI по нему перечитывает данные */
   version = 0
 
@@ -229,6 +237,11 @@ export class Messenger {
     return this.transport?.send(endpoint ? { t: 'push-sub', endpoint } : { t: 'push-unsub' }) ?? false
   }
 
+  /** Попросить сервер прислать пробный пуш на этот браузер; ответ придёт в onPush как test. */
+  testPush(): boolean {
+    return this.transport?.send({ t: 'push-test' }) ?? false
+  }
+
   /** Удалить всё: сообщить собеседникам, закрыть ящики на сервере, стереть базу. */
   async wipeAll(): Promise<void> {
     try {
@@ -292,9 +305,13 @@ export class Messenger {
       case 'push-sub':
         this.onPush?.({ t: 'result', ok: true })
         break
+      case 'push-test':
+        this.onPush?.({ t: 'test', status: f.status })
+        break
       case 'error':
         console.warn('Ошибка сервера:', f.code, f.ref ?? '')
-        if (f.code === 'bad_endpoint' || f.code === 'push_disabled') this.onPush?.({ t: 'result', ok: false, code: f.code })
+        if (f.code === 'bad_endpoint' || f.code === 'push_disabled' || f.code === 'no_subscription')
+          this.onPush?.({ t: 'result', ok: false, code: f.code })
         if (!f.ref) break
         if (this.inFlight.delete(f.ref)) setTimeout(() => void this.flushOutbox(), 3000)
         this.registers.reject(f.ref, new Error(serverRefusal(f.code)))

@@ -21,6 +21,7 @@ export type ServerFrame =
   | { t: 'pong' }
   | { t: 'push-sub'; ok: boolean }
   | { t: 'push-unsub'; ok: boolean }
+  | { t: 'push-test'; status: number }
   | { t: 'error'; code: string; ref?: string }
 
 export interface TransportHandlers {

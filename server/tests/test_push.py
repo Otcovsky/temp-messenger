@@ -177,6 +177,19 @@ def test_unsubscribe(client, push):
     assert push.calls == []
 
 
+def test_push_test_reports_service_status(client, push):
+    bob, _, mb = subscribed(client)
+    bob.send_json({"t": "push-test"})
+    assert bob.receive_json() == {"t": "push-test", "status": 201}
+    assert len(push.calls) == 1
+
+    push.status = 410  # пуш-сервис говорит, что подписки нет — сервер её забывает
+    bob.send_json({"t": "push-test"})
+    assert bob.receive_json() == {"t": "push-test", "status": 410}
+    bob.send_json({"t": "push-test"})
+    assert bob.receive_json()["code"] == "no_subscription"
+
+
 @pytest.mark.parametrize(
     "endpoint",
     [

@@ -141,6 +141,8 @@ POST /blob/<id>/done              204
 → send {id, to:[...], payload, notify?}  ← sent {id, failed:[{to, reason}]}
 → push-sub {endpoint}             ← push-sub {ok: true}      подписка этого ключа AUTH, одна
 → push-unsub                      ← push-unsub {ok: true}
+→ push-test                       ← push-test {status}       пробный пуш себе; status — HTTP-ответ
+                                                             пуш-сервиса, 0 — до него не достучались
 ← msg {id, mailbox, payload, ts}
 → ack {mailbox, ids:[...]}        сервер удаляет сообщения
 → ping                            ← pong

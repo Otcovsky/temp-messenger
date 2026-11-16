@@ -166,9 +166,14 @@ class Pusher:
             watched = self.pending.pop(owner, set())
         if not any(self.store.has_message(mb, msg_id) for mb, msg_id in watched):
             return  # всё уже забрали — человек в приложении
+        await self.deliver(owner)
+
+    async def deliver(self, owner: str) -> int | None:
+        """Послать пуш владельцу сейчас. Возвращает HTTP-статус пуш-сервиса,
+        0 — до него не достучались, None — подписки нет."""
         endpoint = self.store.push_get(owner)
-        if endpoint is None:
-            return
+        if endpoint is None or self.vapid is None:
+            return None
         host = urlsplit(endpoint).hostname
         try:
             status = await asyncio.to_thread(
@@ -176,11 +181,16 @@ class Pusher:
             )
         except Exception as e:
             log.warning("push to %s failed: %s", host, type(e).__name__)
-            return
+            return 0
+        # В журнале — только пуш-сервис и его ответ: по ним не понять, кому был пуш
         if status in (404, 410):  # подписки больше нет: её отозвали или приложение удалили
             self.store.push_delete(owner, endpoint)
+            log.info("push via %s: HTTP %d, subscription removed", host, status)
         elif status >= 400:
             log.warning("push rejected by %s: HTTP %d", host, status)
+        else:
+            log.info("push via %s: HTTP %d", host, status)
+        return status
 
     async def close(self) -> None:
         for task in list(self.tasks):

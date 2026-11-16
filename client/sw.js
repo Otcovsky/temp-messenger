@@ -29,6 +29,7 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('message', (event) => {
   if (event.data === 'skipWaiting') self.skipWaiting()
+  if (event.data === 'pushTest') testUntil = Date.now() + 30_000
 })
 
 /* Пуш от сервера пустой: он лишь сообщает, что в каком-то ящике ждёт сообщение. Что и от кого —
@@ -36,12 +37,14 @@ self.addEventListener('message', (event) => {
  * Показывать уведомление нужно на каждый пуш: иначе Safari и Chrome отзывают подписку.
  * Если приложение уже на экране, уведомление беззвучное и сразу убирается. */
 const PUSH_TAG = 'tm-msg'
+/** До этого момента идёт проверка уведомлений из настроек: пуш показываем, даже если приложение открыто */
+let testUntil = 0
 
 self.addEventListener('push', (event) => {
   event.waitUntil(
     (async () => {
       const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
-      const visible = windows.some((c) => c.visibilityState === 'visible')
+      const visible = Date.now() > testUntil && windows.some((c) => c.visibilityState === 'visible')
       await self.registration.showNotification('Temp Messenger', {
         body: 'Новое сообщение',
         icon: '/icon-192.png',

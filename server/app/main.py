@@ -11,6 +11,7 @@
   → send {id, to:[...], payload, notify?}  ← sent {id, failed:[{to, reason}]}
   → push-sub {endpoint}        ← push-sub {ok: true}
   → push-unsub                 ← push-unsub {ok: true}
+  → push-test                  ← push-test {status}   пробный пуш себе; status — ответ пуш-сервиса
   ← msg {id, mailbox, payload, ts}
   → ack {mailbox, ids:[...]}
   → ping                       ← pong
@@ -300,6 +301,14 @@ def create_app(cfg: Settings = default_settings, push_send: PushSend | None = No
         elif t == "push-unsub":
             store.push_delete(conn.owner)
             await conn.send({"t": "push-unsub", "ok": True})
+
+        elif t == "push-test":
+            # Пробный пуш самому себе: клиент показывает ответ пуш-сервиса, чтобы было видно,
+            # на каком шаге теряются уведомления.
+            status = await pusher.deliver(conn.owner)
+            if status is None:
+                raise ProtocolError("no_subscription")
+            await conn.send({"t": "push-test", "status": status})
 
         else:
             raise ProtocolError("unknown_type")

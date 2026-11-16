@@ -1,7 +1,7 @@
-import { Bell, BellOff, Download, RefreshCw, Smartphone, X } from 'lucide-react'
+import { Bell, BellOff, BellRing, Download, RefreshCw, Smartphone, X } from 'lucide-react'
 import { useState } from 'react'
 import { applyUpdate, isIos, isStandalone, promptInstall, usePwa } from '../pwa'
-import { disablePush, enablePush, usePush } from '../push'
+import { disablePush, enablePush, testPush, usePush } from '../push'
 
 /** Плашка «Доступно обновление»: новая версия применяется только по нажатию. */
 export function UpdateToast() {
@@ -131,7 +131,7 @@ export function AppSection() {
 
 /** Раздел настроек: пуш-уведомления. Выключены, пока человек сам их не включит. */
 export function NotificationsSection() {
-  const { supported, serverReady, permission, enabled, error } = usePush()
+  const { supported, serverReady, permission, enabled, confirmed, error, test } = usePush()
   const [busy, setBusy] = useState(false)
   const run = async (fn: () => Promise<void>) => {
     setBusy(true)
@@ -168,9 +168,35 @@ export function NotificationsSection() {
           пишут.
         </p>
         {enabled ? (
-          <button className="btn btn-soft w-full" onClick={() => run(disablePush)} disabled={busy}>
-            <BellOff className="size-5" /> Выключить уведомления
-          </button>
+          <>
+            <p className="flex items-start gap-2">
+              <span
+                className={`mt-1.5 size-2 shrink-0 rounded-full ${confirmed ? 'bg-emerald-500' : 'bg-amber-400'}`}
+              />
+              <span className="muted">
+                {confirmed
+                  ? 'Включены: сервер знает, как разбудить это устройство.'
+                  : 'Включены, но сервер ещё не подтвердил подписку этого устройства.'}
+              </span>
+            </p>
+            <div className="grid grid-cols-2 gap-2.5">
+              <button
+                className="btn btn-primary"
+                onClick={() => run(testPush)}
+                disabled={busy || !confirmed || test?.ok === null}
+              >
+                <BellRing className="size-5" /> Проверить
+              </button>
+              <button className="btn btn-soft" onClick={() => run(disablePush)} disabled={busy}>
+                <BellOff className="size-5" /> Выключить
+              </button>
+            </div>
+            {test && (
+              <p className={`note ${test.ok === false ? 'note-error' : 'note-info'}`} role="status">
+                {test.text}
+              </p>
+            )}
+          </>
         ) : (
           <button
             className="btn btn-primary w-full"
