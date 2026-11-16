@@ -54,9 +54,11 @@ export interface Message {
   from: string
   /** Время отправки по часам отправителя */
   ts: number
-  type: 'text' | 'file'
-  /** У файла — подпись к нему (или пустая строка) */
+  type: 'text' | 'file' | 'call'
+  /** У файла — подпись к нему (или пустая строка); у звонка — готовая строка для ленты */
   text: string
+  /** Запись о звонке. Хранится только у себя: собеседнику не отправляется */
+  call?: CallInfo
   status: MessageStatus
   /** Для входящих: отправлена ли квитанция «прочитано» */
   readSent?: boolean
@@ -68,6 +70,17 @@ export interface Message {
   transfer?: 'up' | 'down'
   /** Файлы, отправленные одной пачкой, показываются одним пузырём-альбомом */
   album?: string
+}
+
+export interface CallInfo {
+  /**
+   * answered — разговор состоялся; missed — мне звонили, я не ответил; declined — отклонён
+   * (мной входящий или собеседником исходящий); noanswer — я звонил, не ответили;
+   * busy — собеседник говорил с другим; cancelled — я сбросил до ответа; failed — не соединилось.
+   */
+  outcome: 'answered' | 'missed' | 'declined' | 'noanswer' | 'busy' | 'cancelled' | 'failed'
+  /** Длительность разговора, секунды */
+  duration?: number
 }
 
 export interface FileInfo {
@@ -108,6 +121,8 @@ export interface OutboxItem {
   msgId?: string
   /** Получателя стоит разбудить пуш-уведомлением (сообщение, а не квитанция) */
   notify?: boolean
+  /** Сколько секунд сообщение имеет смысл (сигналы звонка). Нет — обычный срок хранения на сервере */
+  ttl?: number
 }
 
 interface Schema extends DBSchema {

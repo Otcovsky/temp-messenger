@@ -1,6 +1,7 @@
 import { ChevronRight, KeyRound, MessageCirclePlus, ScanQrCode, Trash2, UserPlus } from 'lucide-react'
 import { useState } from 'react'
 import { Avatar } from './Avatar'
+import { CallsSection } from './CallUi'
 import { CreateInviteDialog, JoinDialog } from './InviteDialogs'
 import { useLive, useMessenger } from './hooks'
 import { Modal } from './Modal'
@@ -222,6 +223,7 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
 
       <AppSection />
       <NotificationsSection />
+      <CallsSection />
 
       <h3 className="section-title mt-6">Удалить всё</h3>
       <p className="muted mb-3 text-sm leading-relaxed">

@@ -83,8 +83,12 @@ Enc(IK_B) = AES-256-GCM(key, iv, IK_B, AD = EK_B || E_A)        48 байт
 | `file` | `{blob, key, size, name, mime, caption?, album?}` | файл с необязательной подписью, см. «Файлы» |
 | `receipt` | `{status: "delivered" \| "read", ids: [...]}` | квитанции |
 | `goodbye` | `{}` | собеседник удалил чат |
+| `call-offer` | `{call, sdp}` | приглашение к звонку, см. «Звонки» |
+| `call-answer` | `{call, sdp}` | ответ на звонок |
+| `call-ice` | `{call, candidates: [...]}` | адреса для соединения, найденные позже |
+| `call-end` | `{call, reason}` | звонок закончен или отклонён |
 
-Неизвестные типы игнорируются. Планируются: `call-*`, `group-*`, `sender-key`, `edit`, `delete`, `reaction`.
+Неизвестные типы игнорируются. Планируются: `group-*`, `sender-key`, `edit`, `delete`, `reaction`.
 
 ## Файлы
 
@@ -138,7 +142,9 @@ POST /blob/<id>/done              204
                                   invite: true — ящик ждёт ответа на приглашение, false — обычный
 → probe {mailbox}                 ← probe {mailbox, state: "open" | "used" | "none"}
 → unregister {mailbox}            ← unregistered {mailbox}
-→ send {id, to:[...], payload, notify?}  ← sent {id, failed:[{to, reason}]}
+→ send {id, to:[...], payload, notify?, ttl?}  ← sent {id, failed:[{to, reason}]}
+                                  ttl — сколько секунд хранить недоставленное (не больше 7 дней)
+→ ice                             ← ice {servers, ttl}       STUN/TURN для звонка, см. «Звонки»
 → push-sub {endpoint}             ← push-sub {ok: true}      подписка этого ключа AUTH, одна
 → push-unsub                      ← push-unsub {ok: true}
 → push-test                       ← push-test {status}       пробный пуш себе; status — HTTP-ответ
@@ -197,3 +203,50 @@ HTTPS-адреса известных пуш-сервисов (`TM_PUSH_HOSTS`),
 Настройки сервера: `TM_PUSH_SUBJECT` — контакт владельца для пуш-сервисов (`https://...` или
 `mailto:...`); пока он не задан, пуши выключены и `ready` приходит без `push`. Ещё: `TM_PUSH_TTL_SEC`,
 `TM_PUSH_DELAY_SEC`, `TM_PUSH_OFFLINE_DELAY_SEC`.
+
+## Звонки
+
+Аудиозвонок один на один на WebRTC. Сигналы — обычные зашифрованные сообщения (`call-*`), поэтому
+сервер не знает, что идёт звонок, и не видит адресов. Звук шифрует сам WebRTC (DTLS-SRTP); отпечаток
+его ключа записан в `sdp`, а `sdp` пришёл по сквозному каналу — значит, подменить собеседника
+посередине нельзя.
+
+```
+A → B   call-offer  {call: <id>, sdp}       notify: true, ttl 60 с
+B → A   call-answer {call, sdp}             ttl 60 с
+A ⇄ B   call-ice    {call, candidates}      адреса, найденные после отправки sdp; ttl 60 с
+A ⇄ B   call-end    {call, reason}          hangup | decline | busy | timeout | failed
+```
+
+- `call` — случайный id звонка (16 байт base64url). Сигналы с другим id игнорируются.
+- Перед отправкой `sdp` клиент ждёт до 2,5 с, пока браузер соберёт адреса, — обычно всё уходит
+  одним сообщением, `call-ice` нужен редко.
+- Сигналы живут на сервере 60 секунд (`ttl`): опоздавшее приглашение не должно звонить через час.
+  Исключение — `call-end` от звонившего, если на звонок не ответили (`timeout` или `hangup`): он
+  хранится как обычное сообщение, и по нему получатель, вернувшись в сеть, узнаёт о пропущенном.
+- Вызов ждёт ответа 45 с. Если оба позвонили друг другу одновременно, остаётся звонок с меньшим
+  id: звонивший с бо́льшим молча бросает свой и принимает чужой.
+- Занят другим звонком — отвечает `call-end {reason: "busy"}`.
+- Запись о звонке в ленте чата каждый клиент ведёт сам (сообщение типа `call` в своей базе,
+  собеседнику не отправляется).
+
+**Адреса и IP.** Перед звонком клиент спрашивает у сервера `ice` и получает список для
+`RTCPeerConnection`:
+
+```json
+{ "t": "ice", "ttl": 21600, "servers": [
+  { "urls": ["stun:chat.example:3478"] },
+  { "urls": ["turn:chat.example:3478?transport=udp"], "username": "1731400000", "credential": "<base64>" } ] }
+```
+
+Логин TURN временный (схема REST API coturn): `username` — время, до которого он годен,
+`credential = base64(HMAC-SHA1(секрет, username))`. Выдаётся только ключу `AUTH`, у которого есть
+хотя бы один ящик. Список пуст, если TURN не настроен, — тогда соединиться можно только напрямую.
+
+По умолчанию клиент ставит `iceTransportPolicy: "relay"`: звук идёт только через TURN, и собеседник
+не узнаёт IP-адрес. TURN-сервер при этом видит адреса обоих и объём трафика, но не содержимое.
+Прямое соединение (быстрее, но адрес виден собеседнику) включается в настройках; без TURN оно
+используется всегда.
+
+Настройки сервера: `TM_ICE_URLS` (адреса через запятую), `TM_TURN_SECRET` (общий секрет с coturn,
+`static-auth-secret`), `TM_TURN_TTL_SEC`. Установка coturn — `deploy/calls-setup.sh`.

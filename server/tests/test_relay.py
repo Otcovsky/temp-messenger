@@ -171,3 +171,67 @@ def test_health_reports_version(tmp_path):
     cfg = Settings(db_path=str(tmp_path / "t.sqlite3"), blob_dir=str(tmp_path / "blobs"), version_file=str(tmp_path / "nope"))
     with TestClient(create_app(cfg)) as c:
         assert c.get("/health").json() == {"ok": True, "version": "dev"}
+
+
+def test_short_ttl_message_expires(tmp_path):
+    s = Store(str(tmp_path / "c.sqlite3"))
+    s.register("a" * 22, "owner", now=1000)
+    s.enqueue("a" * 22, "call", "p", ttl=60, max_queue=5, now=1000)
+    s.enqueue("a" * 22, "text", "p", ttl=7 * 24 * 3600, max_queue=5, now=1000)
+    assert [m.id for m in s.pending("a" * 22, now=1030)] == ["call", "text"]
+    # Срок вышел, уборки ещё не было — сигнал звонка всё равно не отдаётся
+    assert [m.id for m in s.pending("a" * 22, now=1061)] == ["text"]
+
+
+def test_send_rejects_bad_ttl(client):
+    alice, _ = connect(client)
+    mb = mailbox()
+    alice.send_json({"t": "register", "mailbox": mb})
+    alice.receive_json()
+    for bad in (0, -5, "60", True, 1.5):
+        alice.send_json({"t": "send", "id": "msg-00000009", "to": [mb], "payload": "p", "ttl": bad})
+        assert alice.receive_json() == {"t": "error", "code": "bad_ttl", "ref": "msg-00000009"}
+    alice.send_json({"t": "send", "id": "msg-00000009", "to": [mb], "payload": "p", "ttl": 60})
+    assert alice.receive_json()["t"] == "msg"
+    assert alice.receive_json() == {"t": "sent", "id": "msg-00000009", "failed": []}
+
+
+def test_ice_servers_with_temporary_turn_login(tmp_path):
+    import hashlib
+    import hmac
+
+    from app.main import ice_servers
+
+    cfg = Settings(
+        db_path=str(tmp_path / "t.sqlite3"),
+        blob_dir=str(tmp_path / "blobs"),
+        ice_urls=("stun:chat.example:3478", "turn:chat.example:3478?transport=udp"),
+        turn_secret="s3cret",
+        turn_ttl_sec=600,
+    )
+    stun, turn = ice_servers(cfg, now=1000)
+    assert stun == {"urls": ["stun:chat.example:3478"]}
+    assert turn["urls"] == ["turn:chat.example:3478?transport=udp"] and turn["username"] == "1600"
+    expected = base64.b64encode(hmac.new(b"s3cret", b"1600", hashlib.sha1).digest()).decode()
+    assert turn["credential"] == expected
+
+    with TestClient(create_app(cfg)) as c, contextlib.ExitStack() as stack:
+        c.stack = stack
+        ws, _ = connect(c)
+        ws.send_json({"t": "ice"})
+        assert ws.receive_json() == {"t": "ice", "servers": [], "ttl": 600}  # без ящика — чужой
+        mb = mailbox()
+        ws.send_json({"t": "register", "mailbox": mb})
+        ws.receive_json()
+        ws.send_json({"t": "ice"})
+        got = ws.receive_json()
+        assert [s["urls"] for s in got["servers"]] == [stun["urls"], turn["urls"]]
+
+
+def test_no_ice_servers_by_default(client):
+    ws, _ = connect(client)
+    mb = mailbox()
+    ws.send_json({"t": "register", "mailbox": mb})
+    ws.receive_json()
+    ws.send_json({"t": "ice"})
+    assert ws.receive_json()["servers"] == []

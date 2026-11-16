@@ -8,10 +8,11 @@
   → register {mailbox, invite?} ← registered {mailbox}, затем msg ... из очереди
   → probe {mailbox}            ← probe {mailbox, state: open|used|none}
   → unregister {mailbox}       ← unregistered {mailbox}
-  → send {id, to:[...], payload, notify?}  ← sent {id, failed:[{to, reason}]}
+  → send {id, to:[...], payload, notify?, ttl?}  ← sent {id, failed:[{to, reason}]}
   → push-sub {endpoint}        ← push-sub {ok: true}
   → push-unsub                 ← push-unsub {ok: true}
   → push-test                  ← push-test {status}   пробный пуш себе; status — ответ пуш-сервиса
+  → ice                        ← ice {servers, ttl}   STUN/TURN для звонка с временным логином
   ← msg {id, mailbox, payload, ts}
   → ack {mailbox, ids:[...]}
   → ping                       ← pong
@@ -22,6 +23,8 @@
 import asyncio
 import base64
 import contextlib
+import hashlib
+import hmac
 import logging
 import os
 import re
@@ -52,6 +55,24 @@ def b64url_decode(s: str) -> bytes:
 
 def b64url_encode(b: bytes) -> str:
     return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+
+
+def ice_servers(cfg: Settings, now: int | None = None) -> list[dict]:
+    """Список для RTCPeerConnection. Логин TURN временный (схема REST API coturn): имя — время,
+    до которого он годен, пароль — HMAC-SHA1 от имени на общем с coturn секрете. Сам секрет
+    клиенту не уходит, а просроченный логин coturn не примет."""
+    if not cfg.ice_urls:
+        return []
+    stun = [u for u in cfg.ice_urls if u.startswith(("stun:", "stuns:"))]
+    turn = [u for u in cfg.ice_urls if u.startswith(("turn:", "turns:"))]
+    servers: list[dict] = []
+    if stun:
+        servers.append({"urls": stun})
+    if turn and cfg.turn_secret:
+        username = str((now or int(time.time())) + cfg.turn_ttl_sec)
+        digest = hmac.new(cfg.turn_secret.encode(), username.encode(), hashlib.sha1).digest()
+        servers.append({"urls": turn, "username": username, "credential": base64.b64encode(digest).decode()})
+    return servers
 
 
 class ProtocolError(Exception):
@@ -265,6 +286,11 @@ def create_app(cfg: Settings = default_settings, push_send: PushSend | None = No
                 raise ProtocolError("bad_payload", msg_id)
             # notify: true — сообщение стоит уведомления (не квитанция и не служебное).
             notify = frame.get("notify") is True
+            # ttl — сколько секунд хранить, если получатель не в сети (сигналы звонка живут секунды)
+            ttl = frame.get("ttl", cfg.message_ttl_sec)
+            if not isinstance(ttl, int) or isinstance(ttl, bool) or ttl < 1:
+                raise ProtocolError("bad_ttl", msg_id)
+            ttl = min(ttl, cfg.message_ttl_sec)
 
             now = int(time.time())
             failed = []
@@ -272,7 +298,7 @@ def create_app(cfg: Settings = default_settings, push_send: PushSend | None = No
                 if not isinstance(raw, str) or not MAILBOX_RE.match(raw):
                     failed.append({"to": raw, "reason": "bad_mailbox"})
                     continue
-                res = store.enqueue(raw, msg_id, payload, cfg.message_ttl_sec, cfg.max_queue_per_mailbox, now)
+                res = store.enqueue(raw, msg_id, payload, ttl, cfg.max_queue_per_mailbox, now)
                 if res == "stored":
                     online = bool(hub.subs.get(raw))
                     await hub.push(raw, {"t": "msg", "id": msg_id, "mailbox": raw, "payload": payload, "ts": now})
@@ -301,6 +327,12 @@ def create_app(cfg: Settings = default_settings, push_send: PushSend | None = No
         elif t == "push-unsub":
             store.push_delete(conn.owner)
             await conn.send({"t": "push-unsub", "ok": True})
+
+        elif t == "ice":
+            # Логин TURN получает только тот, у кого есть хотя бы один ящик: чужим ретранслятор
+            # трафика не раздаём (а расход ограничен ещё и квотами самого coturn).
+            servers = ice_servers(cfg) if store.has_mailboxes(conn.owner) else []
+            await conn.send({"t": "ice", "servers": servers, "ttl": cfg.turn_ttl_sec})
 
         elif t == "push-test":
             # Пробный пуш самому себе: клиент показывает ответ пуш-сервиса, чтобы было видно,

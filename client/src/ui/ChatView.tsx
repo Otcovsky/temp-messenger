@@ -7,12 +7,17 @@ import {
   Info,
   Lock,
   Paperclip,
+  Phone,
+  PhoneIncoming,
+  PhoneMissed,
+  PhoneOutgoing,
   SendHorizontal,
   ShieldCheck,
   Trash2,
   UserX,
 } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { startCall } from '../core/calls'
 import { MAX_FILE } from '../core/messenger'
 import type { Message } from '../storage/db'
 import { AttachmentTray, MAX_ATTACHMENTS } from './AttachmentTray'
@@ -146,6 +151,11 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
             )}
           </span>
         </button>
+        {!contact.gone && contact.theirMailbox && (
+          <button className="btn-icon" onClick={() => void startCall(convId)} aria-label="Позвонить" title="Позвонить">
+            <Phone className="size-5.5" />
+          </button>
+        )}
         <button className="btn-icon" onClick={() => setInfo(true)} aria-label="О чате" title="О чате">
           <Info className="size-5.5" />
         </button>
@@ -375,6 +385,19 @@ function SingleBubble({
   onRetry: () => void
   onMediaLoad: () => void
 }) {
+  if (msg.type === 'call') {
+    const bad = msg.call?.outcome !== 'answered'
+    const Icon = msg.call?.outcome === 'missed' ? PhoneMissed : mine ? PhoneOutgoing : PhoneIncoming
+    return (
+      <div className={`relative max-w-[min(560px,82%)] animate-pop-in px-3.5 py-2 ${shape} ${color}`}>
+        <span className={`${TEXT} inline-flex items-center gap-2`}>
+          <Icon className={`size-4.5 shrink-0 ${bad && !mine ? 'text-rose-500' : ''}`} />
+          {msg.text}
+        </span>
+        <Meta msg={msg} mine={mine} onRetry={onRetry} />
+      </div>
+    )
+  }
   const isFile = msg.type === 'file' && !!msg.file
   const isImage = isFile && isInlineImage(msg)
   const caption = isFile ? msg.text : ''

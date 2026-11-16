@@ -19,8 +19,16 @@ import {
 } from '../crypto/handshake'
 import { type KeyPair, generateDH, generateSigning } from '../crypto/primitives'
 import { type RatchetState, ratchetDecrypt, ratchetEncrypt } from '../crypto/ratchet'
-import { type Content, decodeContent, decodePayload, encodeContent, encodePayload } from '../protocol/envelope'
 import {
+  type CallContent,
+  type Content,
+  decodeContent,
+  decodePayload,
+  encodeContent,
+  encodePayload,
+} from '../protocol/envelope'
+import {
+  type CallInfo,
   type Contact,
   type Conversation,
   type DB,
@@ -65,7 +73,10 @@ const REGISTER_TIMEOUT_MS = 8_000
 const HANDLED_MAX = 2_000
 const NO_CONNECTION = 'Нет связи с сервером. Попробуйте ещё раз, когда связь появится.'
 /** Типы содержимого, о которых получателю стоит показать уведомление */
-const NOTIFY_TYPES = new Set(['hello', 'text', 'file'])
+const NOTIFY_TYPES = new Set(['hello', 'text', 'file', 'call-offer'])
+/** Сколько секунд живёт сигнал звонка: дольше вызов всё равно не длится */
+export const CALL_SIGNAL_TTL_SEC = 60
+const ICE_TIMEOUT_MS = 4_000
 const NO_ANSWER = 'Сервер не ответил. Проверьте связь и попробуйте ещё раз.'
 
 /** Понятный текст для отказа сервера (кадр error) на register или probe. */
@@ -107,6 +118,7 @@ export class Messenger {
   /** Ждут ответа probe / registered по ящику */
   private probes = new Waiters<InviteState>()
   private registers = new Waiters<void>()
+  private iceWaiters = new Waiters<RTCIceServer[]>()
   /** Проверка базы при запуске: onReady ждёт её, чтобы не регистрировать ящики удаляемых контактов */
   private repaired: Promise<void> = Promise.resolve()
   /**
@@ -117,6 +129,8 @@ export class Messenger {
   private handled = new Set<string>()
   /** Id сообщений, чей файл сейчас загружается или скачивается */
   private transfers = new Set<string>()
+  /** Слушатель сигналов звонка (calls.ts): вызывается после записи состояния храповика */
+  onCall: ((contact: Contact, c: CallContent) => void) | null = null
   /** Слушатель пуш-уведомлений (push.ts): подключение к серверу и ответ сервера на подписку */
   onPush:
     | ((
@@ -189,6 +203,7 @@ export class Messenger {
           // Ответа по разорванному соединению уже не будет — не держим человека до таймаута
           this.probes.rejectAll(new Error(NO_CONNECTION))
           this.registers.rejectAll(new Error(NO_CONNECTION))
+          this.iceWaiters.rejectAll(new Error(NO_CONNECTION))
         }
         this.emit()
       },
@@ -303,6 +318,9 @@ export class Messenger {
       case 'probe':
         this.probes.resolve(f.mailbox, f.state)
         break
+      case 'ice':
+        this.iceWaiters.resolve('ice', Array.isArray(f.servers) ? f.servers : [])
+        break
       case 'push-sub':
         this.onPush?.({ t: 'result', ok: true })
         break
@@ -326,7 +344,15 @@ export class Messenger {
     const items = await this.db.getAllFromIndex('outbox', 'byCreated')
     for (const it of items) {
       if (this.inFlight.has(it.id)) continue
-      const frame = { t: 'send', id: it.id, to: it.to, payload: it.payload, ...(it.notify ? { notify: true } : {}) }
+      if (it.ttl && Date.now() > it.createdAt + it.ttl * 1000) {
+        await this.db.delete('outbox', it.id) // сигнал звонка устарел, пока не было связи
+        continue
+      }
+      const frame = {
+        t: 'send', id: it.id, to: it.to, payload: it.payload,
+        ...(it.notify ? { notify: true } : {}),
+        ...(it.ttl ? { ttl: it.ttl } : {}),
+      }
       if (!this.transport.send(frame)) break
       this.inFlight.add(it.id)
     }
@@ -698,7 +724,7 @@ export class Messenger {
     this.emit()
   }
 
-  private sendContent(contact: Contact, content: Content, msgId?: string): Promise<void> {
+  private sendContent(contact: Contact, content: Content, msgId?: string, ttl?: number): Promise<void> {
     return this.serial(async () => {
       if (!contact.theirMailbox || contact.gone) throw new Error('Собеседнику больше нельзя писать')
       const sess = await this.db.get('sessions', contact.id)
@@ -711,6 +737,7 @@ export class Messenger {
         tx.objectStore('outbox').put({
           id: content.id, to: [to], payload, createdAt: Date.now(), msgId,
           ...(NOTIFY_TYPES.has(content.type) ? { notify: true } : {}),
+          ...(ttl ? { ttl } : {}),
         }),
       ])
     }).then(() => this.flushOutbox())
@@ -854,6 +881,12 @@ export class Messenger {
         return
       case 'hello':
         return // повторный hello по уже установленной сессии — игнорируем
+      case 'call-offer':
+      case 'call-answer':
+      case 'call-ice':
+      case 'call-end':
+        if (!c.body || typeof c.body.call !== 'string' || !ID_RE.test(c.body.call)) return
+        return () => this.onCall?.(contact, c)
     }
   }
 
@@ -892,6 +925,46 @@ export class Messenger {
   }
 
   // --- для UI --------------------------------------------------------------
+
+  // --- звонки ----------------------------------------------------------------
+
+  /**
+   * Отправить сигнал звонка собеседнику. keep — хранить на сервере как обычное сообщение
+   * (для «звонок закончился, а вы не ответили»: по нему собеседник узнает о пропущенном).
+   */
+  sendCall(contactId: string, signal: Pick<CallContent, 'type' | 'body'>, keep = false): Promise<void> {
+    return this.db.get('contacts', contactId).then((contact) => {
+      if (!contact) throw new Error('Контакт не найден')
+      const content = { id: randomId(), ts: Date.now(), ...signal } as CallContent
+      return this.sendContent(contact, content, undefined, keep ? undefined : CALL_SIGNAL_TTL_SEC)
+    })
+  }
+
+  /** STUN/TURN-серверы для звонка с временным логином. Пустой список — соединяться напрямую. */
+  iceServers(): Promise<RTCIceServer[]> {
+    return this.iceWaiters.wait('ice', ICE_TIMEOUT_MS, () => this.noAnswer(), () => this.send({ t: 'ice' }))
+  }
+
+  /** Записать звонок в ленту чата. Повторная запись того же звонка ничего не меняет. */
+  async addCallRecord(contactId: string, callId: string, mine: boolean, ts: number, call: CallInfo): Promise<void> {
+    const text = callLabel(mine, call)
+    await transact(this.db, ['conversations', 'messages'], async (tx) => {
+      const messages = tx.objectStore('messages')
+      const conversations = tx.objectStore('conversations')
+      const conv = await conversations.get(contactId)
+      if (!conv || (await messages.get(callId))) return
+      const isOpen = this.activeConv === conv.id && document.visibilityState === 'visible'
+      // readSent: квитанцию о прочтении слать не о чем — у собеседника этой записи нет
+      await messages.put({
+        id: callId, conv: conv.id, from: mine ? 'me' : contactId, ts, type: 'call', text, status: 'received', readSent: true, call,
+      })
+      await conversations.put({
+        ...conv, lastTs: Math.max(conv.lastTs, ts), lastText: text,
+        unread: call.outcome === 'missed' && !isOpen ? conv.unread + 1 : conv.unread,
+      })
+    })
+    this.emit()
+  }
 
   setActiveConversation(id: string | null): void {
     this.activeConv = id
@@ -1041,6 +1114,29 @@ function parseFile(b: unknown): FileInfo | null {
   if (typeof key !== 'string' || !FILE_KEY_RE.test(key)) return null
   if (typeof size !== 'number' || !Number.isSafeInteger(size) || size < 1 || size > MAX_FILE) return null
   return { blob, key, size, name: cleanFileName(String(name ?? '')), mime: cleanMime(String(mime ?? '')), state: 'loading' }
+}
+
+/** Строка о звонке для ленты и списка чатов. */
+export function callLabel(mine: boolean, call: CallInfo): string {
+  switch (call.outcome) {
+    case 'answered': {
+      const s = Math.max(0, Math.round(call.duration ?? 0))
+      const time = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+      return `${mine ? 'Исходящий' : 'Входящий'} звонок · ${time}`
+    }
+    case 'missed':
+      return 'Пропущенный звонок'
+    case 'declined':
+      return mine ? 'Звонок отклонён' : 'Отклонённый звонок'
+    case 'noanswer':
+      return 'Звонок без ответа'
+    case 'busy':
+      return 'Собеседник был занят'
+    case 'cancelled':
+      return 'Отменённый звонок'
+    case 'failed':
+      return 'Звонок не удался'
+  }
 }
 
 function newConversation(contact: Contact): Conversation {

@@ -54,6 +54,16 @@ class Settings:
     # Живой клиент подтверждает за доли секунды, так что 2 с хватает, чтобы отличить его от уснувшего.
     push_delay_sec: float = float(os.environ.get("TM_PUSH_DELAY_SEC", 2))
     push_offline_delay_sec: float = float(os.environ.get("TM_PUSH_OFFLINE_DELAY_SEC", 0.3))
+    # Звонки. Адреса STUN/TURN-серверов через запятую, например
+    # "stun:chat.example:3478,turn:chat.example:3478?transport=udp,turn:chat.example:3478?transport=tcp".
+    # Пусто — клиенты соединяются только напрямую (сработает в одной локальной сети).
+    ice_urls: tuple[str, ...] = tuple(
+        u.strip() for u in os.environ.get("TM_ICE_URLS", "").split(",") if u.strip()
+    )
+    # Общий секрет с coturn (static-auth-secret): по нему выдаются временные логины для TURN
+    turn_secret: str = os.environ.get("TM_TURN_SECRET", "")
+    # Сколько действует выданный логин. Должен пережить самый длинный звонок.
+    turn_ttl_sec: int = _int("TM_TURN_TTL_SEC", 6 * 3600)
 
 
 settings = Settings()

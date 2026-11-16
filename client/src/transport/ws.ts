@@ -22,6 +22,7 @@ export type ServerFrame =
   | { t: 'push-sub'; ok: boolean }
   | { t: 'push-unsub'; ok: boolean }
   | { t: 'push-test'; status: number }
+  | { t: 'ice'; servers: RTCIceServer[]; ttl: number }
   | { t: 'error'; code: string; ref?: string }
 
 export interface TransportHandlers {

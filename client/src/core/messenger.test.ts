@@ -20,11 +20,14 @@ const { relay, FakeTransport, blobs } = vi.hoisted(() => {
     seen: string[] = []
     /** Флаг notify каждого принятого send, по порядку */
     notify: boolean[] = []
+    /** Срок хранения (ttl) каждого принятого send; undefined — обычный */
+    ttl: (number | undefined)[] = []
 
     reset() {
       this.boxes.clear()
       this.seen = []
       this.notify = []
+      this.ttl = []
     }
 
     handle(from: FakeTransport, f: Frame) {
@@ -49,6 +52,7 @@ const { relay, FakeTransport, blobs } = vi.hoisted(() => {
         case 'send': {
           const failed: Frame[] = []
           this.notify.push(f.notify === true)
+          this.ttl.push(f.ttl)
           for (const to of f.to as string[]) {
             const b = this.boxes.get(to)
             if (!b) {
@@ -467,5 +471,32 @@ describe('файлы', () => {
     // hello Боба и текст Алисы — с уведомлением; квитанции «доставлено» и «прочитано» — без
     expect(relay.notify.filter(Boolean)).toHaveLength(2)
     expect(relay.notify.filter((n) => !n).length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('сигналы звонка доходят до собеседника и живут на сервере недолго', async () => {
+    const { alice, bob, aliceConv, bobConv } = await connected()
+    const got: any[] = []
+    bob.onCall = (contact: any, c: any) => got.push({ from: contact.id, type: c.type, body: c.body })
+    const call = 'A'.repeat(22)
+    relay.notify = []
+    relay.ttl = []
+    await alice.sendCall(aliceConv, { type: 'call-offer', body: { call, sdp: 'v=0' } })
+    await alice.sendCall(aliceConv, { type: 'call-end', body: { call, reason: 'timeout' } }, true)
+    await alice.sendCall(aliceConv, { type: 'call-end', body: { call: 'не id', reason: 'hangup' } })
+    await until(() => got.length === 2)
+    await settle()
+    expect(got).toEqual([
+      { from: bobConv, type: 'call-offer', body: { call, sdp: 'v=0' } },
+      { from: bobConv, type: 'call-end', body: { call, reason: 'timeout' } },
+    ])
+    // Приглашение будит получателя и хранится минуту; «не ответили» хранится как обычное сообщение
+    expect(relay.notify).toEqual([true, false, false])
+    expect(relay.ttl).toEqual([60, undefined, 60])
+    expect(await texts(bob, bobConv)).toEqual([]) // в ленту сигналы не попадают
+
+    await bob.addCallRecord(bobConv, call, false, 1000, { outcome: 'missed' })
+    await bob.addCallRecord(bobConv, call, false, 1000, { outcome: 'answered', duration: 5 }) // повтор не меняет запись
+    expect(await texts(bob, bobConv)).toEqual(['Пропущенный звонок'])
+    expect((await bob.conversations())[0].unread).toBe(1)
   })
 })

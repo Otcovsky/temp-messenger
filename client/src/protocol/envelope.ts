@@ -91,7 +91,37 @@ export interface GoodbyeContent extends Base {
   body: Record<string, never>
 }
 
-export type Content = TextContent | FileContent | HelloContent | ReceiptContent | GoodbyeContent
+/**
+ * Сигналы звонка (docs/protocol.md, «Звонки»). Идут тем же шифрованным каналом, что и сообщения,
+ * поэтому сервер не видит ни самого факта звонка, ни адресов, а отпечаток ключа медиапотока
+ * внутри sdp заверен ключами собеседников.
+ */
+export type CallEndReason = 'hangup' | 'decline' | 'busy' | 'timeout' | 'failed'
+
+export interface CallOfferContent extends Base {
+  type: 'call-offer'
+  body: { call: string; sdp: string }
+}
+
+export interface CallAnswerContent extends Base {
+  type: 'call-answer'
+  body: { call: string; sdp: string }
+}
+
+/** Адреса для соединения, найденные уже после отправки offer/answer. */
+export interface CallIceContent extends Base {
+  type: 'call-ice'
+  body: { call: string; candidates: RTCIceCandidateInit[] }
+}
+
+export interface CallEndContent extends Base {
+  type: 'call-end'
+  body: { call: string; reason: CallEndReason }
+}
+
+export type CallContent = CallOfferContent | CallAnswerContent | CallIceContent | CallEndContent
+
+export type Content = TextContent | FileContent | HelloContent | ReceiptContent | GoodbyeContent | CallContent
 
 export function encodeContent(c: Content): Bytes {
   return pad(utf8(JSON.stringify(c)))
@@ -105,4 +135,6 @@ export function decodeContent(b: Bytes): Content | null {
   return KNOWN_TYPES.has(c.type) ? (c as Content) : null
 }
 
-const KNOWN_TYPES = new Set(['text', 'file', 'hello', 'receipt', 'goodbye'])
+const KNOWN_TYPES = new Set([
+  'text', 'file', 'hello', 'receipt', 'goodbye', 'call-offer', 'call-answer', 'call-ice', 'call-end',
+])

@@ -1,8 +1,10 @@
 import { Loader2, MessagesSquare, ShieldCheck, TriangleAlert } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { initCalls } from '../core/calls'
 import { Messenger } from '../core/messenger'
 import { checkSupport } from '../crypto/primitives'
 import { ChatView } from './ChatView'
+import { CallOverlay } from './CallUi'
 import { AcceptInviteDialog } from './InviteDialogs'
 import { MessengerContext, useMessenger, useVersion } from './hooks'
 import { requestPersistence } from '../pwa'
@@ -49,6 +51,7 @@ export function App() {
         if (cancelled) return
         const m = await Messenger.open()
         initPush(m)
+        initCalls(m)
         if (m.hasAccount) m.start()
         setBoot({ kind: 'ready', m })
         await new Promise(() => {}) // держим замок, пока вкладка жива
@@ -130,6 +133,7 @@ function Main({ invite, clearInvite }: { invite: string | null; clearInvite: () 
           </div>
         </section>
       )}
+      <CallOverlay />
       {invite && (
         <AcceptInviteDialog
           code={invite}

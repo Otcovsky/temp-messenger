@@ -152,11 +152,13 @@ class Store:
         )
         return "stored" if cur.rowcount else "duplicate"
 
-    def pending(self, mailbox_id: str, limit: int = 500) -> list[StoredMessage]:
+    def pending(self, mailbox_id: str, limit: int = 500, now: int | None = None) -> list[StoredMessage]:
+        # Истёкшие не отдаём, даже если уборка до них ещё не дошла: у сигналов звонка срок —
+        # секунды, и опоздавшее приглашение к звонку никому не нужно.
         rows = self.db.execute(
             "SELECT mailbox_id, id, payload, created_at FROM messages "
-            "WHERE mailbox_id=? ORDER BY created_at, rowid LIMIT ?",
-            (mailbox_id, limit),
+            "WHERE mailbox_id=? AND expires_at>? ORDER BY created_at, rowid LIMIT ?",
+            (mailbox_id, now or int(time.time()), limit),
         ).fetchall()
         return [StoredMessage(*r) for r in rows]
 
@@ -169,6 +171,9 @@ class Store:
             f"DELETE FROM messages WHERE mailbox_id=? AND id IN ({marks})", (mailbox_id, *ids)
         )
         return cur.rowcount
+
+    def has_mailboxes(self, owner: str) -> bool:
+        return self.db.execute("SELECT 1 FROM mailboxes WHERE owner=? LIMIT 1", (owner,)).fetchone() is not None
 
     def has_message(self, mailbox_id: str, msg_id: str) -> bool:
         """Сообщение ещё в очереди, то есть получатель его не подтвердил."""
