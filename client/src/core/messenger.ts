@@ -124,7 +124,8 @@ export class Messenger {
           | { t: 'ready' }
           | { t: 'result'; ok: true }
           | { t: 'result'; ok: false; code: string }
-          | { t: 'test'; status: number },
+          | { t: 'test'; status: number }
+          | { t: 'incoming' },
       ) => void)
     | null = null
   /** Растёт при каждом изменении — UI по нему перечитывает данные */
@@ -877,6 +878,7 @@ export class Messenger {
     return () => {
       // Без await: мы внутри serial(), а отправка сама встаёт в ту же очередь
       void this.sendReceipt(contact, isOpen ? 'read' : 'delivered', [c.id])
+      this.onPush?.({ t: 'incoming' })
       if (fields.transfer === 'down') void this.download(c.id)
     }
   }

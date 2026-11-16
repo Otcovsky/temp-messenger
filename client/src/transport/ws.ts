@@ -34,6 +34,11 @@ const AUTH_CONTEXT = utf8('tm-auth-v1:')
 const PING_MS = 25_000
 /** Сколько ждать ответа на проверочный пинг, прежде чем считать соединение мёртвым */
 const ALIVE_TIMEOUT_MS = 5_000
+/**
+ * То же при возвращении в приложение: соединение, пережившее сон телефона, обычно мертво, а человек
+ * вернулся, чтобы писать. Живой сервер отвечает за доли секунды, так что ждём недолго.
+ */
+const WAKE_TIMEOUT_MS = 1_500
 
 export function defaultServerUrl(): string {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -99,19 +104,24 @@ export class Transport {
       this.attempt = 0
       this.connect()
     } else if (this.ready) {
-      this.checkAlive()
+      this.checkAlive(WAKE_TIMEOUT_MS)
     }
   }
 
   /** Отправить пинг и, если сервер не ответит, переподключиться. */
-  checkAlive(): void {
-    if (!this.ws || !this.ready || this.aliveTimer) return
+  checkAlive(timeout = ALIVE_TIMEOUT_MS): void {
+    if (!this.ws || !this.ready) return
+    if (this.aliveTimer) {
+      if (timeout >= ALIVE_TIMEOUT_MS) return
+      clearTimeout(this.aliveTimer) // идёт обычная проверка — заменяем её срочной
+      this.aliveTimer = undefined
+    }
     const since = Date.now()
     this.send({ t: 'ping' })
     this.aliveTimer = setTimeout(() => {
       this.aliveTimer = undefined
       if (this.lastFrameAt < since) this.drop()
-    }, ALIVE_TIMEOUT_MS)
+    }, timeout)
   }
 
   /** Бросить текущее соединение, не дожидаясь close от браузера, и сразу открыть новое. */

@@ -155,18 +155,24 @@ class Pusher:
             return
         self.pending[owner] = {(mailbox, msg_id)}
         delay = self.cfg.push_delay_sec if online else self.cfg.push_offline_delay_sec
-        task = asyncio.create_task(self._run(owner, delay))
+        task = asyncio.create_task(self._run(owner, delay, online))
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
 
-    async def _run(self, owner: str, delay: float) -> None:
+    async def _run(self, owner: str, delay: float, online: bool) -> None:
+        started = time.monotonic()
         try:
             await asyncio.sleep(delay)
         finally:
             watched = self.pending.pop(owner, set())
         if not any(self.store.has_message(mb, msg_id) for mb, msg_id in watched):
             return  # всё уже забрали — человек в приложении
-        await self.deliver(owner)
+        status = await self.deliver(owner)
+        # Сколько прошло от прихода сообщения до ответа пуш-сервиса — чтобы искать задержки
+        log.info(
+            "push for a %s recipient took %.1fs (HTTP %s)",
+            "connected" if online else "disconnected", time.monotonic() - started, status,
+        )
 
     async def deliver(self, owner: str) -> int | None:
         """Послать пуш владельцу сейчас. Возвращает HTTP-статус пуш-сервиса,

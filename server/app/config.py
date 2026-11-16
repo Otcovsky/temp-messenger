@@ -51,8 +51,9 @@ class Settings:
     # Сколько пуш-сервис держит уведомление для выключенного телефона
     push_ttl_sec: int = _int("TM_PUSH_TTL_SEC", 24 * 3600)
     # Сколько ждать ack от получателя, прежде чем слать пуш: если он в сети и если нет
-    push_delay_sec: float = float(os.environ.get("TM_PUSH_DELAY_SEC", 4))
-    push_offline_delay_sec: float = float(os.environ.get("TM_PUSH_OFFLINE_DELAY_SEC", 1))
+    # Живой клиент подтверждает за доли секунды, так что 2 с хватает, чтобы отличить его от уснувшего.
+    push_delay_sec: float = float(os.environ.get("TM_PUSH_DELAY_SEC", 2))
+    push_offline_delay_sec: float = float(os.environ.get("TM_PUSH_OFFLINE_DELAY_SEC", 0.3))
 
 
 settings = Settings()

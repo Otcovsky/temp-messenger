@@ -99,7 +99,9 @@ function endTest(text: string, ok: boolean) {
 export function initPush(m: Messenger): void {
   messenger = m
   m.onPush = (e) => {
-    if (e.t === 'ready') {
+    if (e.t === 'incoming') {
+      void notifyIfHidden()
+    } else if (e.t === 'ready') {
       set({ serverReady: !!m.pushKey, confirmed: false })
       void sync()
     } else if (e.t === 'test') {
@@ -125,6 +127,22 @@ export function initPush(m: Messenger): void {
 async function clearNotifications() {
   const reg = await navigator.serviceWorker.getRegistration()
   for (const n of (await reg?.getNotifications({ tag: TAG })) ?? []) n.close()
+}
+
+/**
+ * Сообщение пришло, пока приложение свёрнуто, но ещё работает. Сервер пуш не пошлёт: сообщение
+ * уже забрано. Поэтому уведомление показываем сами — такое же, как по пушу.
+ */
+async function notifyIfHidden() {
+  if (!supported || !state.enabled || document.visibilityState === 'visible') return
+  if (Notification.permission !== 'granted') return
+  try {
+    const reg = await navigator.serviceWorker.getRegistration()
+    const options = { body: 'Новое сообщение', icon: '/icon-192.png', tag: TAG, renotify: true }
+    await reg?.showNotification('Temp Messenger', options)
+  } catch (e) {
+    console.warn('Не удалось показать уведомление', e)
+  }
 }
 
 function activeWorker(): Promise<ServiceWorkerRegistration> {
