@@ -4,7 +4,7 @@ import { Avatar } from './Avatar'
 import { CreateInviteDialog, JoinDialog } from './InviteDialogs'
 import { useLive, useMessenger } from './hooks'
 import { Modal } from './Modal'
-import { AppSection, InstallBanner } from './PwaUi'
+import { AppSection, InstallBanner, NotificationsSection } from './PwaUi'
 import { formatTime } from './format'
 
 export { Avatar }
@@ -221,6 +221,7 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
       </p>
 
       <AppSection />
+      <NotificationsSection />
 
       <h3 className="section-title mt-6">Удалить всё</h3>
       <p className="muted mb-3 text-sm leading-relaxed">

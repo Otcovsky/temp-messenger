@@ -18,10 +18,13 @@ const { relay, FakeTransport, blobs } = vi.hoisted(() => {
     boxes = new Map<string, Box>()
     /** Все payload, которые видел сервер */
     seen: string[] = []
+    /** Флаг notify каждого принятого send, по порядку */
+    notify: boolean[] = []
 
     reset() {
       this.boxes.clear()
       this.seen = []
+      this.notify = []
     }
 
     handle(from: FakeTransport, f: Frame) {
@@ -45,6 +48,7 @@ const { relay, FakeTransport, blobs } = vi.hoisted(() => {
           break
         case 'send': {
           const failed: Frame[] = []
+          this.notify.push(f.notify === true)
           for (const to of f.to as string[]) {
             const b = this.boxes.get(to)
             if (!b) {
@@ -451,5 +455,17 @@ describe('файлы', () => {
     const m = (await fileMsg(alice, aliceConv))!
     await alice.deleteConversation(aliceConv)
     expect(await alice.fileData(m.id)).toBeUndefined()
+  })
+
+  it('просит уведомить получателя о сообщениях, но не о квитанциях', async () => {
+    const { alice, bob, aliceConv, bobConv } = await connected()
+    await alice.sendText(aliceConv, 'привет')
+    await until(async () => (await texts(bob, bobConv)).includes('привет'))
+    bob.setActiveConversation(bobConv)
+    await bob.markRead(bobConv)
+    await until(async () => (await alice.messages(aliceConv)).some((x: any) => x.status === 'read'))
+    // hello Боба и текст Алисы — с уведомлением; квитанции «доставлено» и «прочитано» — без
+    expect(relay.notify.filter(Boolean)).toHaveLength(2)
+    expect(relay.notify.filter((n) => !n).length).toBeGreaterThanOrEqual(2)
   })
 })

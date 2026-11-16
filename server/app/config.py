@@ -36,6 +36,23 @@ class Settings:
     blob_upload_timeout_sec: int = _int("TM_BLOB_UPLOAD_TIMEOUT_SEC", 3600)
     # Файл с версией (хешем коммита), его пишет deploy/deploy.sh; путь относительно рабочего каталога
     version_file: str = os.environ.get("TM_VERSION_FILE", "VERSION")
+    # Пуш-уведомления. Включаются, когда задан TM_PUSH_SUBJECT — контакт владельца сервера
+    # для пуш-сервисов (адрес сайта https://... или mailto:...); без него Apple пуши не принимает.
+    push_subject: str = os.environ.get("TM_PUSH_SUBJECT", "")
+    # Пуш-сервисы, на адреса которых сервер согласен слать запросы (домен и его поддомены)
+    push_hosts: tuple[str, ...] = tuple(
+        h.strip().lower()
+        for h in os.environ.get(
+            "TM_PUSH_HOSTS",
+            "fcm.googleapis.com,push.apple.com,push.services.mozilla.com,notify.windows.com",
+        ).split(",")
+        if h.strip()
+    )
+    # Сколько пуш-сервис держит уведомление для выключенного телефона
+    push_ttl_sec: int = _int("TM_PUSH_TTL_SEC", 24 * 3600)
+    # Сколько ждать ack от получателя, прежде чем слать пуш: если он в сети и если нет
+    push_delay_sec: float = float(os.environ.get("TM_PUSH_DELAY_SEC", 4))
+    push_offline_delay_sec: float = float(os.environ.get("TM_PUSH_OFFLINE_DELAY_SEC", 1))
 
 
 settings = Settings()

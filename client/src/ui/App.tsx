@@ -6,6 +6,7 @@ import { ChatView } from './ChatView'
 import { AcceptInviteDialog } from './InviteDialogs'
 import { MessengerContext, useMessenger, useVersion } from './hooks'
 import { requestPersistence } from '../pwa'
+import { initPush } from '../push'
 import { Onboarding } from './Onboarding'
 import { Sidebar } from './Sidebar'
 
@@ -47,6 +48,7 @@ export function App() {
       const run = async () => {
         if (cancelled) return
         const m = await Messenger.open()
+        initPush(m)
         if (m.hasAccount) m.start()
         setBoot({ kind: 'ready', m })
         await new Promise(() => {}) // держим замок, пока вкладка жива

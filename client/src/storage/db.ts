@@ -106,6 +106,8 @@ export interface OutboxItem {
   createdAt: number
   /** id сообщения в messages, если это пользовательское сообщение */
   msgId?: string
+  /** Получателя стоит разбудить пуш-уведомлением (сообщение, а не квитанция) */
+  notify?: boolean
 }
 
 interface Schema extends DBSchema {

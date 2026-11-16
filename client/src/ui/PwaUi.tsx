@@ -1,6 +1,7 @@
-import { Download, RefreshCw, Smartphone, X } from 'lucide-react'
+import { Bell, BellOff, Download, RefreshCw, Smartphone, X } from 'lucide-react'
 import { useState } from 'react'
 import { applyUpdate, isIos, isStandalone, promptInstall, usePwa } from '../pwa'
+import { disablePush, enablePush, usePush } from '../push'
 
 /** Плашка «Доступно обновление»: новая версия применяется только по нажатию. */
 export function UpdateToast() {
@@ -123,6 +124,72 @@ export function AppSection() {
             </span>
           </p>
         )}
+      </div>
+    </>
+  )
+}
+
+/** Раздел настроек: пуш-уведомления. Выключены, пока человек сам их не включит. */
+export function NotificationsSection() {
+  const { supported, serverReady, permission, enabled, error } = usePush()
+  const [busy, setBusy] = useState(false)
+  const run = async (fn: () => Promise<void>) => {
+    setBusy(true)
+    try {
+      await fn()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  let body
+  if (!supported) {
+    body = (
+      <p className="muted">
+        {isIos() && !isStandalone()
+          ? 'На iPhone и iPad уведомления работают только в приложении, установленном на экран «Домой».'
+          : 'Этот браузер не умеет показывать уведомления от сайтов.'}
+      </p>
+    )
+  } else if (serverReady === false) {
+    body = <p className="muted">На этом сервере уведомления не настроены.</p>
+  } else if (permission === 'denied') {
+    body = (
+      <p className="muted">
+        Уведомления запрещены в настройках браузера. Разрешите их для этого сайта и вернитесь сюда.
+      </p>
+    )
+  } else {
+    body = (
+      <>
+        <p className="muted">
+          Когда приложение закрыто, сервер будит его через пуш-сервис браузера (Google, Apple или Mozilla). В
+          уведомлении нет ни текста, ни имени — только «Новое сообщение». Пуш-сервис узнаёт лишь время, когда вам
+          пишут.
+        </p>
+        {enabled ? (
+          <button className="btn btn-soft w-full" onClick={() => run(disablePush)} disabled={busy}>
+            <BellOff className="size-5" /> Выключить уведомления
+          </button>
+        ) : (
+          <button
+            className="btn btn-primary w-full"
+            onClick={() => run(enablePush)}
+            disabled={busy || serverReady === null}
+          >
+            <Bell className="size-5" /> {serverReady === null ? 'Нет связи с сервером' : 'Включить уведомления'}
+          </button>
+        )}
+        {error && <p className="note note-error">{error}</p>}
+      </>
+    )
+  }
+
+  return (
+    <>
+      <h3 className="section-title mt-6">Уведомления</h3>
+      <div className="grid gap-3 rounded-2xl bg-slate-900/[0.03] p-4 text-sm leading-relaxed dark:bg-white/[0.04]">
+        {body}
       </div>
     </>
   )

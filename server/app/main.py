@@ -4,11 +4,13 @@
 
   ← challenge {nonce}
   → auth {pub, sig}            подпись Ed25519 над b"tm-auth-v1:" + nonce
-  ← ready
+  ← ready {push?}              push — ключ VAPID, если сервер умеет слать пуш-уведомления
   → register {mailbox, invite?} ← registered {mailbox}, затем msg ... из очереди
   → probe {mailbox}            ← probe {mailbox, state: open|used|none}
   → unregister {mailbox}       ← unregistered {mailbox}
-  → send {id, to:[...], payload}  ← sent {id, failed:[{to, reason}]}
+  → send {id, to:[...], payload, notify?}  ← sent {id, failed:[{to, reason}]}
+  → push-sub {endpoint}        ← push-sub {ok: true}
+  → push-unsub                 ← push-unsub {ok: true}
   ← msg {id, mailbox, payload, ts}
   → ack {mailbox, ids:[...]}
   → ping                       ← pong
@@ -32,6 +34,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from .blobs import BlobFiles, add_blob_routes, cleanup_blobs
 from .config import Settings, settings as default_settings
+from .push import Pusher, PushSend, endpoint_allowed
 from .store import RegisterResult, Store
 
 log = logging.getLogger("temp_messenger")
@@ -123,12 +126,13 @@ def read_version(path: str) -> str:
         return "dev"
 
 
-def create_app(cfg: Settings = default_settings) -> FastAPI:
+def create_app(cfg: Settings = default_settings, push_send: PushSend | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.store = Store(cfg.db_path)
         app.state.blobs = BlobFiles(cfg.blob_dir)
         app.state.hub = Hub()
+        app.state.pusher = Pusher(app.state.store, cfg, push_send)
         task = asyncio.create_task(cleanup_loop(app.state.store, app.state.blobs))
         try:
             yield
@@ -136,6 +140,7 @@ def create_app(cfg: Settings = default_settings) -> FastAPI:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+            await app.state.pusher.close()
             app.state.store.close()
 
     async def cleanup_loop(store: Store, blobs: BlobFiles) -> None:
@@ -186,8 +191,9 @@ def create_app(cfg: Settings = default_settings) -> FastAPI:
                 await ws.close(code=4001)
             return
 
+        pusher: Pusher = app.state.pusher
         conn = Connection(ws, owner, cfg)
-        await conn.send({"t": "ready"})
+        await conn.send({"t": "ready", "push": pusher.public_key} if pusher.enabled else {"t": "ready"})
         try:
             while True:
                 try:
@@ -199,7 +205,7 @@ def create_app(cfg: Settings = default_settings) -> FastAPI:
                     await conn.send({"t": "error", "code": "rate_limited", "ref": _ref(frame)})
                     continue
                 try:
-                    await handle(conn, frame, store, hub)
+                    await handle(conn, frame, store, hub, pusher)
                 except ProtocolError as e:
                     await conn.send({"t": "error", "code": e.code, "ref": e.ref})
         except WebSocketDisconnect:
@@ -207,7 +213,7 @@ def create_app(cfg: Settings = default_settings) -> FastAPI:
         finally:
             hub.drop(conn)
 
-    async def handle(conn: Connection, frame: dict, store: Store, hub: Hub) -> None:
+    async def handle(conn: Connection, frame: dict, store: Store, hub: Hub, pusher: Pusher) -> None:
         if not isinstance(frame, dict):
             raise ProtocolError("bad_frame")
         t = frame.get("t")
@@ -256,6 +262,8 @@ def create_app(cfg: Settings = default_settings) -> FastAPI:
             payload = frame.get("payload")
             if not isinstance(payload, str) or len(payload.encode()) > cfg.max_payload_bytes:
                 raise ProtocolError("bad_payload", msg_id)
+            # notify: true — сообщение стоит уведомления (не квитанция и не служебное).
+            notify = frame.get("notify") is True
 
             now = int(time.time())
             failed = []
@@ -265,7 +273,10 @@ def create_app(cfg: Settings = default_settings) -> FastAPI:
                     continue
                 res = store.enqueue(raw, msg_id, payload, cfg.message_ttl_sec, cfg.max_queue_per_mailbox, now)
                 if res == "stored":
+                    online = bool(hub.subs.get(raw))
                     await hub.push(raw, {"t": "msg", "id": msg_id, "mailbox": raw, "payload": payload, "ts": now})
+                    if notify:
+                        pusher.notify(raw, msg_id, online)
                 elif res != "duplicate":
                     failed.append({"to": raw, "reason": res})
             await conn.send({"t": "sent", "id": msg_id, "failed": failed})
@@ -276,6 +287,19 @@ def create_app(cfg: Settings = default_settings) -> FastAPI:
             if not isinstance(ids, list) or len(ids) > MAX_ACK_IDS or not all(isinstance(i, str) for i in ids):
                 raise ProtocolError("bad_ack", mb)
             store.ack(mb, conn.owner, ids)
+
+        elif t == "push-sub":
+            if not pusher.enabled:
+                raise ProtocolError("push_disabled")
+            endpoint = frame.get("endpoint")
+            if not endpoint_allowed(endpoint, cfg.push_hosts):
+                raise ProtocolError("bad_endpoint")
+            store.push_set(conn.owner, endpoint)
+            await conn.send({"t": "push-sub", "ok": True})
+
+        elif t == "push-unsub":
+            store.push_delete(conn.owner)
+            await conn.send({"t": "push-unsub", "ok": True})
 
         else:
             raise ProtocolError("unknown_type")

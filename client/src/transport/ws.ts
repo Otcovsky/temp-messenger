@@ -12,13 +12,15 @@ export type InviteState = 'open' | 'used' | 'none'
 
 export type ServerFrame =
   | { t: 'challenge'; nonce: string }
-  | { t: 'ready' }
+  | { t: 'ready'; push?: string }
   | { t: 'registered'; mailbox: string; created: boolean }
   | { t: 'unregistered'; mailbox: string }
   | { t: 'sent'; id: string; failed: { to: string; reason: string }[] }
   | { t: 'msg'; id: string; mailbox: string; payload: string; ts: number }
   | { t: 'probe'; mailbox: string; state: InviteState }
   | { t: 'pong' }
+  | { t: 'push-sub'; ok: boolean }
+  | { t: 'push-unsub'; ok: boolean }
   | { t: 'error'; code: string; ref?: string }
 
 export interface TransportHandlers {
@@ -48,6 +50,8 @@ export class Transport {
   /** Когда от сервера последний раз что-то приходило */
   private lastFrameAt = 0
   status: ConnStatus = 'offline'
+  /** Ключ VAPID сервера из кадра ready; null — сервер не умеет слать пуш-уведомления */
+  pushKey: string | null = null
 
   constructor(
     private url: string,
@@ -157,6 +161,7 @@ export class Transport {
         ws.send(JSON.stringify({ t: 'auth', pub: b64e(this.authKey.pub), sig: b64e(sig) }))
       } else if (f.t === 'ready') {
         this.ready = true
+        this.pushKey = typeof f.push === 'string' ? f.push : null
         this.attempt = 0
         this.setStatus('online')
         this.pingTimer = setInterval(() => this.checkAlive(), PING_MS)

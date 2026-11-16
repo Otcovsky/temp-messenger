@@ -41,6 +41,19 @@ CREATE TABLE IF NOT EXISTS blobs (
 );
 CREATE INDEX IF NOT EXISTS blobs_expires ON blobs(expires_at);
 CREATE INDEX IF NOT EXISTS blobs_owner ON blobs(owner);
+
+-- Подписки на пуш-уведомления: одна на ключ доступа (то есть на браузер).
+CREATE TABLE IF NOT EXISTS push_subs (
+    owner       TEXT PRIMARY KEY,
+    endpoint    TEXT NOT NULL,          -- адрес у пуш-сервиса браузера
+    created_at  INTEGER NOT NULL
+);
+
+-- Настройки самого сервера (например, ключ VAPID).
+CREATE TABLE IF NOT EXISTS meta (
+    key         TEXT PRIMARY KEY,
+    value       TEXT NOT NULL
+);
 """
 
 
@@ -114,6 +127,10 @@ class Store:
     def mailbox_exists(self, mailbox_id: str) -> bool:
         return self.db.execute("SELECT 1 FROM mailboxes WHERE id=?", (mailbox_id,)).fetchone() is not None
 
+    def mailbox_owner(self, mailbox_id: str) -> str | None:
+        row = self.db.execute("SELECT owner FROM mailboxes WHERE id=?", (mailbox_id,)).fetchone()
+        return row[0] if row else None
+
     # --- сообщения -------------------------------------------------------
 
     def enqueue(
@@ -152,6 +169,43 @@ class Store:
             f"DELETE FROM messages WHERE mailbox_id=? AND id IN ({marks})", (mailbox_id, *ids)
         )
         return cur.rowcount
+
+    def has_message(self, mailbox_id: str, msg_id: str) -> bool:
+        """Сообщение ещё в очереди, то есть получатель его не подтвердил."""
+        return (
+            self.db.execute(
+                "SELECT 1 FROM messages WHERE mailbox_id=? AND id=?", (mailbox_id, msg_id)
+            ).fetchone()
+            is not None
+        )
+
+    # --- пуш-подписки и настройки ---------------------------------------
+
+    def push_set(self, owner: str, endpoint: str, now: int | None = None) -> None:
+        self.db.execute(
+            "INSERT INTO push_subs(owner, endpoint, created_at) VALUES (?,?,?) "
+            "ON CONFLICT(owner) DO UPDATE SET endpoint=excluded.endpoint, created_at=excluded.created_at "
+            "WHERE endpoint<>excluded.endpoint",
+            (owner, endpoint, now or int(time.time())),
+        )
+
+    def push_get(self, owner: str) -> str | None:
+        row = self.db.execute("SELECT endpoint FROM push_subs WHERE owner=?", (owner,)).fetchone()
+        return row[0] if row else None
+
+    def push_delete(self, owner: str, endpoint: str | None = None) -> None:
+        """endpoint задан — удалить, только если подписка всё ещё эта (её могли успеть заменить)."""
+        if endpoint is None:
+            self.db.execute("DELETE FROM push_subs WHERE owner=?", (owner,))
+        else:
+            self.db.execute("DELETE FROM push_subs WHERE owner=? AND endpoint=?", (owner, endpoint))
+
+    def meta_get(self, key: str) -> str | None:
+        row = self.db.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
+        return row[0] if row else None
+
+    def meta_set(self, key: str, value: str) -> None:
+        self.db.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?,?)", (key, value))
 
     # --- файлы ----------------------------------------------------------
     # Порядок работы: blob_reserve → (запись на диск) → blob_complete или blob_abort.
@@ -241,4 +295,6 @@ class Store:
         boxes = self.db.execute(
             "DELETE FROM mailboxes WHERE last_seen<=?", (now - mailbox_idle_ttl,)
         ).rowcount
+        if boxes:  # подписка без единого ящика никому не нужна; живой клиент пришлёт её заново
+            self.db.execute("DELETE FROM push_subs WHERE owner NOT IN (SELECT owner FROM mailboxes)")
         return msgs, boxes

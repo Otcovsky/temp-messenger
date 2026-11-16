@@ -64,6 +64,8 @@ const REGISTER_TIMEOUT_MS = 8_000
 /** Сколько id уже обработанных входящих помнить, чтобы не разбирать повторную доставку */
 const HANDLED_MAX = 2_000
 const NO_CONNECTION = 'Нет связи с сервером. Попробуйте ещё раз, когда связь появится.'
+/** Типы содержимого, о которых получателю стоит показать уведомление */
+const NOTIFY_TYPES = new Set(['hello', 'text', 'file'])
 const NO_ANSWER = 'Сервер не ответил. Проверьте связь и попробуйте ещё раз.'
 
 /** Понятный текст для отказа сервера (кадр error) на register или probe. */
@@ -115,6 +117,8 @@ export class Messenger {
   private handled = new Set<string>()
   /** Id сообщений, чей файл сейчас загружается или скачивается */
   private transfers = new Set<string>()
+  /** Слушатель пуш-уведомлений (push.ts): подключение к серверу и ответ сервера на подписку */
+  onPush: ((e: { t: 'ready' } | { t: 'result'; ok: true } | { t: 'result'; ok: false; code: string }) => void) | null = null
   /** Растёт при каждом изменении — UI по нему перечитывает данные */
   version = 0
 
@@ -215,9 +219,20 @@ export class Messenger {
     this.transport?.send({ t: 'unregister', mailbox })
   }
 
+  /** Ключ VAPID сервера; null — сервер пуши не шлёт или связи ещё не было */
+  get pushKey(): string | null {
+    return this.transport?.pushKey ?? null
+  }
+
+  /** Сообщить серверу адрес пуш-подписки этого браузера; null — отписаться. */
+  setPushEndpoint(endpoint: string | null): boolean {
+    return this.transport?.send(endpoint ? { t: 'push-sub', endpoint } : { t: 'push-unsub' }) ?? false
+  }
+
   /** Удалить всё: сообщить собеседникам, закрыть ящики на сервере, стереть базу. */
   async wipeAll(): Promise<void> {
     try {
+      this.setPushEndpoint(null)
       const contacts = await this.db.getAll('contacts')
       await Promise.all(contacts.map((c) => this.sendGoodbye(c).catch(() => {})))
       await this.flushOutbox()
@@ -238,6 +253,7 @@ export class Messenger {
     for (const r of await mailboxRegistrations(this.db)) this.transport?.send({ t: 'register', ...r })
     for (const mailbox of await pendingUnregisters(this.db)) this.transport?.send({ t: 'unregister', mailbox })
     await this.flushOutbox()
+    this.onPush?.({ t: 'ready' })
     void this.resumeTransfers().catch((e) => console.warn('Не удалось возобновить передачу файлов', e))
   }
 
@@ -273,8 +289,12 @@ export class Messenger {
       case 'probe':
         this.probes.resolve(f.mailbox, f.state)
         break
+      case 'push-sub':
+        this.onPush?.({ t: 'result', ok: true })
+        break
       case 'error':
         console.warn('Ошибка сервера:', f.code, f.ref ?? '')
+        if (f.code === 'bad_endpoint' || f.code === 'push_disabled') this.onPush?.({ t: 'result', ok: false, code: f.code })
         if (!f.ref) break
         if (this.inFlight.delete(f.ref)) setTimeout(() => void this.flushOutbox(), 3000)
         this.registers.reject(f.ref, new Error(serverRefusal(f.code)))
@@ -288,7 +308,8 @@ export class Messenger {
     const items = await this.db.getAllFromIndex('outbox', 'byCreated')
     for (const it of items) {
       if (this.inFlight.has(it.id)) continue
-      if (!this.transport.send({ t: 'send', id: it.id, to: it.to, payload: it.payload })) break
+      const frame = { t: 'send', id: it.id, to: it.to, payload: it.payload, ...(it.notify ? { notify: true } : {}) }
+      if (!this.transport.send(frame)) break
       this.inFlight.add(it.id)
     }
   }
@@ -669,7 +690,10 @@ export class Messenger {
       const to = contact.theirMailbox
       await writeAll(this.db, ['sessions', 'outbox'], (tx) => [
         tx.objectStore('sessions').put({ ...sess, state: r.state }),
-        tx.objectStore('outbox').put({ id: content.id, to: [to], payload, createdAt: Date.now(), msgId }),
+        tx.objectStore('outbox').put({
+          id: content.id, to: [to], payload, createdAt: Date.now(), msgId,
+          ...(NOTIFY_TYPES.has(content.type) ? { notify: true } : {}),
+        }),
       ])
     }).then(() => this.flushOutbox())
   }

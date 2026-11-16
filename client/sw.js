@@ -31,6 +31,40 @@ self.addEventListener('message', (event) => {
   if (event.data === 'skipWaiting') self.skipWaiting()
 })
 
+/* Пуш от сервера пустой: он лишь сообщает, что в каком-то ящике ждёт сообщение. Что и от кого —
+ * знает только само приложение, поэтому текст уведомления всегда один и тот же.
+ * Показывать уведомление нужно на каждый пуш: иначе Safari и Chrome отзывают подписку.
+ * Если приложение уже на экране, уведомление беззвучное и сразу убирается. */
+const PUSH_TAG = 'tm-msg'
+
+self.addEventListener('push', (event) => {
+  event.waitUntil(
+    (async () => {
+      const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+      const visible = windows.some((c) => c.visibilityState === 'visible')
+      await self.registration.showNotification('Temp Messenger', {
+        body: 'Новое сообщение',
+        icon: '/icon-192.png',
+        tag: PUSH_TAG,
+        renotify: !visible,
+        silent: visible,
+      })
+      if (visible) for (const n of await self.registration.getNotifications({ tag: PUSH_TAG })) n.close()
+    })(),
+  )
+})
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  event.waitUntil(
+    (async () => {
+      const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+      if (windows.length) await windows[0].focus()
+      else await self.clients.openWindow('/')
+    })(),
+  )
+})
+
 self.addEventListener('fetch', (event) => {
   const req = event.request
   if (req.method !== 'GET') return

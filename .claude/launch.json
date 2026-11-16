@@ -5,7 +5,8 @@
       "name": "server",
       "runtimeExecutable": "server/.venv/Scripts/python.exe",
       "runtimeArgs": ["-m", "uvicorn", "app.main:app", "--app-dir", "server", "--host", "127.0.0.1", "--port", "8100", "--ws-max-size", "131072"],
-      "port": 8100
+      "port": 8100,
+      "env": { "TM_PUSH_SUBJECT": "https://localhost" }
     },
     {
       "name": "client",
