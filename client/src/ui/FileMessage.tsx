@@ -65,34 +65,64 @@ function ImageViewer({ msg, url, onClose }: { msg: Message; url: string; onClose
   )
 }
 
+/**
+ * Рамка картинки в ленте: не больше 320×320 и 70% ширины экрана, без увеличения маленьких.
+ * Размер задан заранее, поэтому картинка встаёт в ленту сразу целиком, а не растёт при загрузке.
+ */
+const imageBox = (w: number, h: number): React.CSSProperties => ({
+  aspectRatio: `${w} / ${h}`,
+  width: `min(${w}px, 320px, 70vw, ${(320 * w) / h}px)`,
+})
+
 /** Одиночный файл в ленте: картинка целиком или карточка с именем и размером. */
-export function FileMessage({ msg, onMediaLoad }: { msg: Message; onMediaLoad: () => void }) {
+export function FileMessage({ msg }: { msg: Message }) {
+  const m = useMessenger()
   const file = msg.file!
-  const imageUrl = useFileUrl(msg.id, file.state === 'ready' && isInlineMime(file.mime), file.mime)
+  const inline = file.state === 'ready' && isInlineMime(file.mime)
+  const imageUrl = useFileUrl(msg.id, inline, file.mime)
+  const [size, setSize] = useState(file.w && file.h ? { w: file.w, h: file.h } : null)
   const [viewing, setViewing] = useState(false)
 
-  if (!imageUrl) return <FileCard msg={msg} />
+  // Размер ещё не известен (картинку показываем впервые): узнаём его, расшифровав картинку
+  // заранее, и только потом ставим её в ленту — одним шагом, без промежуточных высот
+  useEffect(() => {
+    if (!imageUrl || size) return
+    let alive = true
+    const img = new Image()
+    img.src = imageUrl
+    img.decode().then(
+      () => {
+        const s = { w: img.naturalWidth, h: img.naturalHeight }
+        if (!alive || !s.w || !s.h) return
+        setSize(s)
+        void m.rememberImageSize(msg.id, s.w, s.h)
+      },
+      () => {}, // битая картинка — остаётся карточкой файла
+    )
+    return () => {
+      alive = false
+    }
+  }, [m, msg.id, imageUrl, size])
+
+  if (!inline || !size) return <FileCard msg={msg} />
   return (
     <>
       <button
-        className="block overflow-hidden rounded-[18px] transition active:scale-[0.98]"
+        className="block overflow-hidden rounded-[18px] bg-slate-900/10 transition active:scale-[0.98] dark:bg-white/8"
+        style={imageBox(size.w, size.h)}
+        disabled={!imageUrl}
         onClick={() => setViewing(true)}
         aria-label={`Открыть ${file.name}`}
       >
-        <img
-          className="block max-h-80 max-w-[min(320px,70vw)] object-contain"
-          src={imageUrl}
-          alt={file.name}
-          onLoad={onMediaLoad}
-        />
+        {imageUrl && <img className="block size-full" src={imageUrl} alt={file.name} />}
       </button>
-      {viewing && <ImageViewer msg={msg} url={imageUrl} onClose={() => setViewing(false)} />}
+      {viewing && imageUrl && <ImageViewer msg={msg} url={imageUrl} onClose={() => setViewing(false)} />}
     </>
   )
 }
 
 /** Картинка в сетке альбома: квадрат с обрезкой; пока файл не готов — крутилка. */
-export function MediaTile({ msg, onMediaLoad, className = '' }: { msg: Message; onMediaLoad: () => void; className?: string }) {
+export function MediaTile({ msg, className = '' }: { msg: Message; className?: string }) {
   const file = msg.file!
   const url = useFileUrl(msg.id, file.state === 'ready', file.mime)
   const [viewing, setViewing] = useState(false)
@@ -105,7 +135,7 @@ export function MediaTile({ msg, onMediaLoad, className = '' }: { msg: Message; 
         onClick={() => setViewing(true)}
         aria-label={`Открыть ${file.name}`}
       >
-        {url && <img className="size-full object-cover" src={url} alt={file.name} onLoad={onMediaLoad} />}
+        {url && <img className="size-full object-cover" src={url} alt={file.name} />}
         {busy && (
           <span className="absolute inset-0 grid place-items-center bg-black/15">
             <Loader2 className="size-6 animate-spin text-white drop-shadow" />

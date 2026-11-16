@@ -40,10 +40,19 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
   /** Выбранные, но ещё не отправленные файлы: текст в поле станет подписью к ним */
   const [staged, setStaged] = useState<File[]>([])
   const listRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
-  /** Список прокручен до конца: тогда новые сообщения и подгрузившиеся картинки его не сдвигают вверх */
-  const atBottom = useRef(true)
+  /**
+   * Лента прижата к последнему сообщению: что бы ни выросло (картинки, новые сообщения,
+   * клавиатура сжала экран) — низ остаётся на месте. Открепить её может только сам пользователь.
+   */
+  const pinned = useRef(true)
+  /** Когда пользователь последний раз сам крутил ленту (колесо, палец, полоса прокрутки) */
+  const userScrollAt = useRef(-Infinity)
+  /** Сообщения, что уже были в чате при открытии: они появляются сразу, без анимации */
+  const initial = useRef<Set<string> | null>(null)
+  if (!initial.current && messages) initial.current = new Set(messages.map((msg) => msg.id))
   const count = messages?.length ?? 0
 
   const scrollToEnd = () => {
@@ -51,21 +60,33 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
     if (el) el.scrollTop = el.scrollHeight
   }
 
-  useLayoutEffect(scrollToEnd, [count])
+  useLayoutEffect(() => {
+    pinned.current = true
+    scrollToEnd()
+  }, [count])
 
   useEffect(() => {
     // Новое сообщение пришло, пока чат открыт
     void m.markRead(convId)
   }, [m, convId, count])
 
-  // Клавиатура телефона сжимает экран — держим ленту прижатой к последнему сообщению
-  useEffect(() => {
+  // Высота ленты или её содержимого изменилась — если лента прижата к низу, возвращаем её туда.
+  // ResizeObserver срабатывает после раскладки, но до отрисовки, так что сдвиг не успевает мелькнуть.
+  const ready = !!contact && !!messages
+  useLayoutEffect(() => {
     const el = listRef.current
-    if (!el) return
-    const ro = new ResizeObserver(() => atBottom.current && scrollToEnd())
+    const content = contentRef.current
+    if (!el || !content) return
+    if (pinned.current) scrollToEnd()
+    const ro = new ResizeObserver(() => pinned.current && scrollToEnd())
     ro.observe(el)
+    ro.observe(content)
     return () => ro.disconnect()
-  }, [contact === undefined])
+  }, [ready])
+
+  const userScroll = () => {
+    userScrollAt.current = performance.now()
+  }
 
   const send = async () => {
     const t = text
@@ -164,36 +185,46 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
       <div
         className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-3 pt-3 pb-2 md:px-6"
         ref={listRef}
+        onWheel={userScroll}
+        onTouchMove={userScroll}
+        onKeyDown={userScroll}
+        // Нажатие на саму ленту, а не на сообщение, — это полоса прокрутки
+        onPointerDown={(e) => e.target === e.currentTarget && userScroll()}
         onScroll={(e) => {
           const el = e.currentTarget
-          atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40
+          if (el.scrollHeight - el.scrollTop - el.clientHeight < 40) pinned.current = true
+          // Прокрутку от подгрузки картинок и подстройки браузера за пользовательскую не считаем:
+          // раньше из-за неё лента «отклеивалась» от низа и застревала посреди чата
+          else if (performance.now() - userScrollAt.current < 1000) pinned.current = false
         }}
       >
-        {messages?.length === 0 && (
-          <div className="m-auto flex max-w-xs flex-col items-center gap-3 rounded-3xl bg-white/70 p-6 text-center shadow-sm backdrop-blur dark:bg-white/5">
-            <div className="grid size-14 place-items-center rounded-2xl bg-brand text-white shadow-lg shadow-violet-500/30">
-              <ShieldCheck className="size-7" />
+        <div ref={contentRef} className="flex flex-1 flex-col">
+          {messages?.length === 0 && (
+            <div className="m-auto flex max-w-xs flex-col items-center gap-3 rounded-3xl bg-white/70 p-6 text-center shadow-sm backdrop-blur dark:bg-white/5">
+              <div className="grid size-14 place-items-center rounded-2xl bg-brand text-white shadow-lg shadow-violet-500/30">
+                <ShieldCheck className="size-7" />
+              </div>
+              <p className="font-semibold">Чат создан</p>
+              <p className="muted text-sm leading-relaxed">
+                Сообщения шифруются в браузере и расшифровываются только у собеседника.
+              </p>
             </div>
-            <p className="font-semibold">Чат создан</p>
-            <p className="muted text-sm leading-relaxed">
-              Сообщения шифруются в браузере и расшифровываются только у собеседника.
-            </p>
-          </div>
-        )}
-        {items.map((item, i) => (
-          <MessageRow
-            key={item.parts[0].id}
-            parts={item.parts}
-            prev={items[i - 1]?.parts[0]}
-            next={items[i + 1]?.parts[0]}
-            onRetry={() => {
-              for (const p of item.parts)
-                if (p.status === 'failed')
-                  void m.retry(p.id).catch((e) => setError(e instanceof Error ? e.message : String(e)))
-            }}
-            onMediaLoad={() => atBottom.current && scrollToEnd()}
-          />
-        ))}
+          )}
+          {items.map((item, i) => (
+            <MessageRow
+              key={item.parts[0].id}
+              parts={item.parts}
+              prev={items[i - 1]?.parts[0]}
+              next={items[i + 1]?.parts[0]}
+              onRetry={() => {
+                for (const p of item.parts)
+                  if (p.status === 'failed')
+                    void m.retry(p.id).catch((e) => setError(e instanceof Error ? e.message : String(e)))
+              }}
+              animate={!initial.current?.has(item.parts[0].id)}
+            />
+          ))}
+        </div>
       </div>
 
       {contact.gone && (
@@ -330,13 +361,14 @@ function MessageRow({
   prev,
   next,
   onRetry,
-  onMediaLoad,
+  animate,
 }: {
   parts: Message[]
   prev?: Message
   next?: Message
   onRetry: () => void
-  onMediaLoad: () => void
+  /** Сообщение пришло или отправлено при открытом чате — пузырь появляется с анимацией */
+  animate: boolean
 }) {
   const msg = parts[0]
   const mine = msg.from === 'me'
@@ -351,6 +383,7 @@ function MessageRow({
   const color = mine
     ? 'bg-brand text-white shadow-md shadow-violet-500/20'
     : 'bg-white text-slate-900 shadow-sm shadow-slate-900/5 dark:bg-surface-2-dark dark:text-slate-100 dark:shadow-black/20'
+  const pop = animate ? 'animate-pop-in' : ''
 
   return (
     <>
@@ -361,9 +394,9 @@ function MessageRow({
       )}
       <div className={`flex ${mine ? 'justify-end' : 'justify-start'} ${groupStart ? 'mt-2' : 'mt-0.5'}`}>
         {parts.length > 1 ? (
-          <AlbumBubble parts={parts} mine={mine} className={`${shape} ${color}`} onRetry={onRetry} onMediaLoad={onMediaLoad} />
+          <AlbumBubble parts={parts} mine={mine} className={`${shape} ${color} ${pop}`} onRetry={onRetry} />
         ) : (
-          <SingleBubble msg={msg} mine={mine} shape={shape} color={color} onRetry={onRetry} onMediaLoad={onMediaLoad} />
+          <SingleBubble msg={msg} mine={mine} shape={`${shape} ${pop}`} color={color} onRetry={onRetry} />
         )}
       </div>
     </>
@@ -376,14 +409,12 @@ function SingleBubble({
   shape,
   color,
   onRetry,
-  onMediaLoad,
 }: {
   msg: Message
   mine: boolean
   shape: string
   color: string
   onRetry: () => void
-  onMediaLoad: () => void
 }) {
   if (msg.type === 'call') {
     const bad = msg.call?.outcome !== 'answered'
@@ -405,9 +436,9 @@ function SingleBubble({
   const bare = isImage && !caption
   return (
     <div
-      className={`relative max-w-[min(560px,82%)] animate-pop-in ${shape} ${bare ? 'bg-slate-200 p-0.5 shadow-sm dark:bg-surface-2-dark' : color} ${isImage ? (caption ? 'p-1' : '') : isFile ? 'p-1.5' : 'px-3.5 py-2'}`}
+      className={`relative max-w-[min(560px,82%)] ${shape} ${bare ? 'bg-slate-200 p-0.5 shadow-sm dark:bg-surface-2-dark' : color} ${isImage ? (caption ? 'p-1' : '') : isFile ? 'p-1.5' : 'px-3.5 py-2'}`}
     >
-      {isFile ? <FileMessage msg={msg} onMediaLoad={onMediaLoad} /> : <span className={TEXT}>{msg.text}</span>}
+      {isFile ? <FileMessage msg={msg} /> : <span className={TEXT}>{msg.text}</span>}
       {caption ? (
         // Подпись внутри того же пузыря, что и файл. Под картинкой не шире её самой
         <div className={`px-2 pt-1.5 pb-1 ${isImage ? 'w-0 min-w-full' : ''}`}>
@@ -430,13 +461,11 @@ function AlbumBubble({
   mine,
   className,
   onRetry,
-  onMediaLoad,
 }: {
   parts: Message[]
   mine: boolean
   className: string
   onRetry: () => void
-  onMediaLoad: () => void
 }) {
   const showable = (p: Message) => isInlineMime(p.file!.mime) && p.file!.state !== 'gone' && p.file!.state !== 'error'
   const media = parts.filter(showable)
@@ -447,7 +476,7 @@ function AlbumBubble({
 
   return (
     <div
-      className={`relative animate-pop-in p-1 ${className} ${media.length ? 'w-[min(320px,75vw)]' : 'max-w-[min(560px,82%)]'}`}
+      className={`relative p-1 ${className} ${media.length ? 'w-[min(320px,75vw)]' : 'max-w-[min(560px,82%)]'}`}
     >
       {media.length > 0 && (
         <div className="grid grid-cols-2 gap-0.5 overflow-hidden rounded-[16px]">
@@ -455,7 +484,6 @@ function AlbumBubble({
             <MediaTile
               key={p.id}
               msg={p}
-              onMediaLoad={onMediaLoad}
               className={odd && i === 0 ? (media.length === 1 ? 'col-span-2 aspect-[4/3]' : 'col-span-2 aspect-[2/1]') : 'aspect-square'}
             />
           ))}
