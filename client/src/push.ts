@@ -26,8 +26,12 @@ export interface PushState {
 }
 
 const FLAG = 'tm-push'
-/** Метка всех наших уведомлений: новое заменяет старое, а не копится */
+/** Метки уведомлений (те же, что в sw.js): новое с той же меткой заменяет старое, а не копится */
 const TAG = 'tm-msg'
+const CALL_TAG = 'tm-call'
+const MISSED_TAG = 'tm-missed'
+/** Как часто «звонит» уведомление о входящем звонке */
+const RING_EVERY_MS = 3_000
 /** Сколько ждать service worker: без него подписаться нельзя, а ждать вечно незачем */
 const SW_TIMEOUT_MS = 8_000
 const TEST_TIMEOUT_MS = 20_000
@@ -85,9 +89,9 @@ export function usePush(): PushState {
 }
 
 function refusal(code: string): string {
-  return code === 'bad_endpoint'
-    ? 'Сервер не знает пуш-сервис этого браузера. Попробуйте Chrome, Firefox или Safari.'
-    : 'Сервер не поддерживает уведомления.'
+  if (code === 'bad_endpoint') return 'Сервер не знает пуш-сервис этого браузера. Попробуйте Chrome, Firefox или Safari.'
+  if (code === 'bad_keys') return 'Сервер не принял ключи подписки этого браузера.'
+  return 'Сервер не поддерживает уведомления.'
 }
 
 function endTest(text: string, ok: boolean) {
@@ -119,30 +123,65 @@ export function initPush(m: Messenger): void {
   }
   if (!supported) return
   // Приложение на экране — уведомления больше не нужны
-  const clear = () => document.visibilityState === 'visible' && void clearNotifications()
+  const clear = () => {
+    if (document.visibilityState !== 'visible') return
+    clearInterval(ringTimer)
+    void clearNotifications()
+  }
   document.addEventListener('visibilitychange', clear)
   clear()
 }
 
-async function clearNotifications() {
+async function clearNotifications(tag?: string) {
   const reg = await navigator.serviceWorker.getRegistration()
-  for (const n of (await reg?.getNotifications({ tag: TAG })) ?? []) n.close()
+  for (const n of (await reg?.getNotifications(tag ? { tag } : undefined)) ?? []) n.close()
+}
+
+async function showHidden(title: string, options: NotificationOptions & Record<string, unknown>) {
+  if (!supported || !state.enabled || document.visibilityState === 'visible') return
+  if (Notification.permission !== 'granted') return
+  try {
+    const reg = await navigator.serviceWorker.getRegistration()
+    await reg?.showNotification(title, { icon: '/icon-192.png', ...options })
+  } catch (e) {
+    console.warn('Не удалось показать уведомление', e)
+  }
+}
+
+let ringTimer: ReturnType<typeof setInterval> | undefined
+
+/**
+ * Уведомления о звонке, когда приложение свёрнуто, но ещё работает (если оно закрыто, то же
+ * самое делает service worker по пушу). ring — «звонить»: уведомление со звуком и вибрацией,
+ * повторяется, пока не ответят; stop — перестать; missed — заменить на «Пропущенный звонок».
+ */
+export function callAlert(kind: 'ring' | 'stop' | 'missed'): void {
+  clearInterval(ringTimer)
+  if (!supported) return
+  if (kind === 'ring') {
+    const ring = () =>
+      void showHidden('Входящий звонок', {
+        body: 'Нажмите, чтобы ответить',
+        tag: CALL_TAG,
+        renotify: true,
+        requireInteraction: true,
+        vibrate: [600, 200, 600, 200, 600],
+      })
+    ring()
+    ringTimer = setInterval(ring, RING_EVERY_MS)
+    return
+  }
+  void clearNotifications(CALL_TAG).then(() => {
+    if (kind === 'missed') return showHidden('Пропущенный звонок', { tag: MISSED_TAG, renotify: true })
+  })
 }
 
 /**
  * Сообщение пришло, пока приложение свёрнуто, но ещё работает. Сервер пуш не пошлёт: сообщение
  * уже забрано. Поэтому уведомление показываем сами — такое же, как по пушу (о звонке — со своим текстом).
  */
-export async function notifyIfHidden(body: string): Promise<void> {
-  if (!supported || !state.enabled || document.visibilityState === 'visible') return
-  if (Notification.permission !== 'granted') return
-  try {
-    const reg = await navigator.serviceWorker.getRegistration()
-    const options = { body, icon: '/icon-192.png', tag: TAG, renotify: true }
-    await reg?.showNotification('Temp Messenger', options)
-  } catch (e) {
-    console.warn('Не удалось показать уведомление', e)
-  }
+export function notifyIfHidden(body: string): Promise<void> {
+  return showHidden('Temp Messenger', { body, tag: TAG, renotify: true })
 }
 
 function activeWorker(): Promise<ServiceWorkerRegistration> {
@@ -180,7 +219,9 @@ async function sync(renew = false): Promise<void> {
     }
     sub ??= await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64d(key) })
     set({ error: null })
-    if (!m.setPushEndpoint(sub.endpoint)) set({ error: 'Нет связи с сервером. Подписка отправится, когда связь появится.' })
+    // Ключи подписки нужны серверу, чтобы зашифровать пометку «звонок»: пуш-сервис её не прочтёт
+    const keys = sub.toJSON().keys ?? {}
+    if (!m.setPushEndpoint({ endpoint: sub.endpoint, p256dh: keys.p256dh, auth: keys.auth })) set({ error: 'Нет связи с сервером. Подписка отправится, когда связь появится.' })
   } catch (e) {
     console.warn('Не удалось подписаться на уведомления', e)
     const why = e instanceof Error ? e.message : String(e)
@@ -218,24 +259,30 @@ export async function disablePush(): Promise<void> {
  * Проверка всей цепочки: сервер шлёт пробный пуш на это устройство и сообщает ответ пуш-сервиса.
  * Service worker предупреждён и покажет уведомление, хотя приложение открыто.
  */
-export async function testPush(): Promise<void> {
+export async function testPush(kind?: 'call'): Promise<void> {
   if (!supported || !messenger) return
-  set({ test: { text: 'Отправляю пробное уведомление…', ok: null } })
+  testKind = kind
+  set({ test: { text: kind ? 'Отправляю пробный звонок…' : 'Отправляю пробное уведомление…', ok: null } })
   try {
     ;(await activeWorker()).active?.postMessage('pushTest')
   } catch {
     return endTest('Service worker не запущен — перезапустите приложение.', false)
   }
-  if (!messenger.testPush()) return endTest('Нет связи с сервером.', false)
+  if (!messenger.testPush(kind)) return endTest('Нет связи с сервером.', false)
   clearTimeout(testTimer)
   testTimer = setTimeout(() => endTest('Сервер не ответил на проверку.', false), TEST_TIMEOUT_MS)
 }
 
+let testKind: 'call' | undefined
+
 function onTestResult(status: number) {
   if (status >= 200 && status < 300) {
     endTest(
-      'Пуш-сервис принял уведомление — оно должно появиться за несколько секунд. Если его нет, проверьте в ' +
-        'настройках телефона, что браузеру (или приложению) разрешены уведомления и не включён режим «Не беспокоить».',
+      (testKind
+        ? 'Пуш-сервис принял звонок — телефон должен несколько раз подать сигнал и завибрировать. '
+        : 'Пуш-сервис принял уведомление — оно должно появиться за несколько секунд. ') +
+        'Если ничего нет, проверьте в настройках телефона, что браузеру (или приложению) разрешены уведомления ' +
+        'и не включён режим «Не беспокоить».',
       true,
     )
   } else if (status === 404 || status === 410) {

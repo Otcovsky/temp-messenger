@@ -19,7 +19,7 @@ const { relay, FakeTransport, blobs } = vi.hoisted(() => {
     /** Все payload, которые видел сервер */
     seen: string[] = []
     /** Флаг notify каждого принятого send, по порядку */
-    notify: boolean[] = []
+    notify: unknown[] = []
     /** Срок хранения (ttl) каждого принятого send; undefined — обычный */
     ttl: (number | undefined)[] = []
 
@@ -51,7 +51,7 @@ const { relay, FakeTransport, blobs } = vi.hoisted(() => {
           break
         case 'send': {
           const failed: Frame[] = []
-          this.notify.push(f.notify === true)
+          this.notify.push(f.notify ?? false)
           this.ttl.push(f.ttl)
           for (const to of f.to as string[]) {
             const b = this.boxes.get(to)
@@ -489,8 +489,9 @@ describe('файлы', () => {
       { from: bobConv, type: 'call-offer', body: { call, sdp: 'v=0' } },
       { from: bobConv, type: 'call-end', body: { call, reason: 'timeout' } },
     ])
-    // Приглашение будит получателя и хранится минуту; «не ответили» хранится как обычное сообщение
-    expect(relay.notify).toEqual([true, false, false])
+    // Приглашение звонит у получателя и хранится минуту; «не ответили» хранится как обычное сообщение
+    // и тоже будит — покажет пропущенный; конец состоявшегося разговора не будит
+    expect(relay.notify).toEqual(['call', 'call-end', false])
     expect(relay.ttl).toEqual([60, undefined, 60])
     expect(await texts(bob, bobConv)).toEqual([]) // в ленту сигналы не попадают
 

@@ -1,4 +1,4 @@
-import { Bell, BellOff, BellRing, Download, RefreshCw, Smartphone, X } from 'lucide-react'
+import { Bell, BellOff, BellRing, Download, PhoneCall, RefreshCw, Smartphone, X } from 'lucide-react'
 import { useState } from 'react'
 import { applyUpdate, isIos, isStandalone, promptInstall, usePwa } from '../pwa'
 import { disablePush, enablePush, testPush, usePush } from '../push'
@@ -182,15 +182,23 @@ export function NotificationsSection() {
             <div className="grid grid-cols-2 gap-2.5">
               <button
                 className="btn btn-primary"
-                onClick={() => run(testPush)}
+                onClick={() => run(() => testPush())}
                 disabled={busy || !confirmed || test?.ok === null}
               >
                 <BellRing className="size-5" /> Проверить
               </button>
-              <button className="btn btn-soft" onClick={() => run(disablePush)} disabled={busy}>
-                <BellOff className="size-5" /> Выключить
+              <button
+                className="btn btn-primary"
+                onClick={() => run(() => testPush('call'))}
+                disabled={busy || !confirmed || test?.ok === null}
+                title="Пробное уведомление о входящем звонке"
+              >
+                <PhoneCall className="size-5" /> Звонок
               </button>
             </div>
+            <button className="btn btn-soft w-full" onClick={() => run(disablePush)} disabled={busy}>
+              <BellOff className="size-5" /> Выключить уведомления
+            </button>
             {test && (
               <p className={`note ${test.ok === false ? 'note-error' : 'note-info'}`} role="status">
                 {test.text}

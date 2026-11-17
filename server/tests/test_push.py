@@ -1,6 +1,7 @@
 import base64
 import contextlib
 import json
+import os
 import time
 
 import pytest
@@ -8,12 +9,14 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.main import AUTH_CONTEXT, b64url_decode, create_app
-from app.push import Vapid, endpoint_allowed
+from app.push import Vapid, encrypt_payload, endpoint_allowed, keys_valid
 from app.store import Store
 from test_relay import b64, mailbox
 
@@ -28,10 +31,12 @@ def unb64(s: str) -> bytes:
 class FakePush:
     def __init__(self):
         self.calls: list[tuple[str, str, int]] = []
+        self.bodies: list[bytes | None] = []
         self.status = 201
 
-    def __call__(self, endpoint: str, authorization: str, ttl: int) -> int:
+    def __call__(self, endpoint: str, authorization: str, ttl: int, body: bytes | None = None) -> int:
         self.calls.append((endpoint, authorization, ttl))
+        self.bodies.append(body)
         return self.status
 
     def wait(self, n: int, timeout: float = 2.0) -> None:
@@ -76,13 +81,37 @@ def connect(client, with_push=True):
     return ws, key
 
 
-def subscribed(client, endpoint=ENDPOINT):
-    """Получатель с ящиком и пуш-подпиской."""
+class Browser:
+    """Ключи подписки, как их создаёт браузер, и расшифровка пуша по RFC 8291."""
+
+    def __init__(self):
+        self.key = ec.generate_private_key(ec.SECP256R1())
+        self.auth = os.urandom(16)
+        self.public = self.key.public_key().public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
+
+    @property
+    def keys(self) -> dict:
+        return {"p256dh": b64(self.public), "auth": b64(self.auth)}
+
+    def decrypt(self, body: bytes) -> bytes:
+        salt, idlen = body[:16], body[20]
+        as_public = body[21 : 21 + idlen]
+        shared = self.key.exchange(ec.ECDH(), ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), as_public))
+        ikm = HKDF(hashes.SHA256(), 32, self.auth, b"WebPush: info\x00" + self.public + as_public).derive(shared)
+        cek = HKDF(hashes.SHA256(), 16, salt, b"Content-Encoding: aes128gcm\x00").derive(ikm)
+        nonce = HKDF(hashes.SHA256(), 12, salt, b"Content-Encoding: nonce\x00").derive(ikm)
+        record = AESGCM(cek).decrypt(nonce, body[21 + idlen :], None)
+        assert record.endswith(b"\x02")
+        return record[:-1]
+
+
+def subscribed(client, endpoint=ENDPOINT, browser: Browser | None = None):
+    """Получатель с ящиком и пуш-подпиской (с ключами браузера или, как старый клиент, без них)."""
     ws, key = connect(client)
     mb = mailbox()
     ws.send_json({"t": "register", "mailbox": mb})
     assert ws.receive_json()["t"] == "registered"
-    ws.send_json({"t": "push-sub", "endpoint": endpoint})
+    ws.send_json({"t": "push-sub", "endpoint": endpoint, **(browser.keys if browser else {})})
     assert ws.receive_json() == {"t": "push-sub", "ok": True}
     return ws, key, mb
 
@@ -90,7 +119,7 @@ def subscribed(client, endpoint=ENDPOINT):
 def send(ws, mb, msg_id, notify=True):
     frame = {"t": "send", "id": msg_id, "to": [mb], "payload": "ct"}
     if notify:
-        frame["notify"] = True
+        frame["notify"] = notify
     ws.send_json(frame)
     assert ws.receive_json() == {"t": "sent", "id": msg_id, "failed": []}
 
@@ -177,6 +206,120 @@ def test_unsubscribe(client, push):
     assert push.calls == []
 
 
+def test_encryption_matches_rfc8291_example():
+    """Пример из раздела 5 стандарта: те же ключи и соль дают то же тело запроса."""
+    sender = ec.derive_private_key(
+        int.from_bytes(unb64("yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw"), "big"), ec.SECP256R1()
+    )
+    body = encrypt_payload(
+        b"When I grow up, I want to be a watermelon",
+        unb64("BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4"),
+        unb64("BTBZMqHH6r4Tts7J_aSIgg"),
+        as_private=sender,
+        salt=unb64("DGv6ra1nlYgDCS1FRnbzlw"),
+    )
+    assert b64(body) == (
+        "DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27ml"
+        "mlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A_yl95bQpu6cVPT"
+        "pK4Mqgkf1CXztLVBSt2Ks3oZwbuwXPXLWyouBWLVWGNWQexSgSxsj_Qulcy4a-fN"
+    )
+
+
+def test_call_push_carries_encrypted_mark(client, push):
+    browser = Browser()
+    bob, _, mb = subscribed(client, browser=browser)
+    bob.close()
+    alice, _ = connect(client)
+    send(alice, mb, "msg-00000001", notify="call")
+    push.wait(1)
+    assert browser.decrypt(push.bodies[0]) == b'{"k":"call"}'
+    assert push.calls[0][2] == 45  # опоздавший звонок не нужен: пуш-сервис держит его недолго
+
+    time.sleep(0.1)
+    send(alice, mb, "msg-00000002", notify="call-end")
+    push.wait(2)
+    assert browser.decrypt(push.bodies[1]) == b'{"k":"end"}'
+    assert push.calls[1][2] == 24 * 3600
+
+
+def test_message_push_stays_empty(client, push):
+    bob, _, mb = subscribed(client, browser=Browser())
+    bob.close()
+    alice, _ = connect(client)
+    send(alice, mb, "msg-00000001")
+    push.wait(1)
+    assert push.bodies == [None]
+
+
+def test_call_to_old_subscription_gets_plain_push(client, push):
+    bob, _, mb = subscribed(client)  # подписка без ключей: шифровать нечем
+    bob.close()
+    alice, _ = connect(client)
+    send(alice, mb, "msg-00000001", notify="call")
+    push.wait(1)
+    assert push.bodies == [None]
+
+
+def test_latest_unread_decides_push_kind(client, push):
+    browser = Browser()
+    bob, _, mb = subscribed(client, browser=browser)
+    bob.close()
+    alice, _ = connect(client)
+    send(alice, mb, "msg-00000001")
+    send(alice, mb, "msg-00000002", notify="call")
+    push.wait(1)
+    assert browser.decrypt(push.bodies[0]) == b'{"k":"call"}'
+
+
+def test_unknown_notify_value_is_ignored(client, push):
+    bob, _, mb = subscribed(client, browser=Browser())
+    bob.close()
+    alice, _ = connect(client)
+    send(alice, mb, "msg-00000001", notify="video")
+    time.sleep(0.3)
+    assert push.calls == []
+
+
+def test_subscription_keys_are_validated(client):
+    ws, _ = connect(client)
+    good = Browser().keys
+    for bad in (
+        {"p256dh": good["p256dh"]},
+        {"p256dh": good["p256dh"], "auth": b64(b"short")},
+        {"p256dh": b64(os.urandom(65)), "auth": good["auth"]},
+        {"p256dh": 5, "auth": good["auth"]},
+    ):
+        ws.send_json({"t": "push-sub", "endpoint": ENDPOINT, **bad})
+        assert ws.receive_json()["code"] == "bad_keys"
+    assert keys_valid(**good)
+
+
+def test_push_test_can_ring(client, push):
+    browser = Browser()
+    bob, _, mb = subscribed(client, browser=browser)
+    bob.send_json({"t": "push-test", "kind": "call"})
+    assert bob.receive_json() == {"t": "push-test", "status": 201}
+    assert browser.decrypt(push.bodies[0]) == b'{"k":"call"}'
+    bob.send_json({"t": "push-test", "kind": "video"})
+    assert bob.receive_json()["code"] == "bad_kind"
+
+
+def test_store_migrates_subscriptions_without_keys(tmp_path):
+    import sqlite3
+
+    path = str(tmp_path / "old.sqlite3")
+    db = sqlite3.connect(path)
+    db.executescript(
+        "CREATE TABLE push_subs (owner TEXT PRIMARY KEY, endpoint TEXT NOT NULL, created_at INTEGER NOT NULL);"
+        "INSERT INTO push_subs VALUES ('o', 'https://fcm.googleapis.com/x', 1);"
+    )
+    db.close()
+    store = Store(path)
+    sub = store.push_get("o")
+    assert sub.endpoint == "https://fcm.googleapis.com/x" and sub.p256dh is None
+    store.close()
+
+
 def test_push_test_reports_service_status(client, push):
     bob, _, mb = subscribed(client)
     bob.send_json({"t": "push-test"})
@@ -259,4 +402,4 @@ def test_cleanup_drops_orphan_subscriptions(tmp_path):
     s.push_set("gone", ENDPOINT)
     s.push_set("alive", ENDPOINT)
     s.cleanup(mailbox_idle_ttl=100, now=1101)
-    assert s.push_get("gone") is None and s.push_get("alive") == ENDPOINT
+    assert s.push_get("gone") is None and s.push_get("alive").endpoint == ENDPOINT

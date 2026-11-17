@@ -9,9 +9,9 @@
   → probe {mailbox}            ← probe {mailbox, state: open|used|none}
   → unregister {mailbox}       ← unregistered {mailbox}
   → send {id, to:[...], payload, notify?, ttl?}  ← sent {id, failed:[{to, reason}]}
-  → push-sub {endpoint}        ← push-sub {ok: true}
+  → push-sub {endpoint, p256dh?, auth?}  ← push-sub {ok: true}
   → push-unsub                 ← push-unsub {ok: true}
-  → push-test                  ← push-test {status}   пробный пуш себе; status — ответ пуш-сервиса
+  → push-test {kind?}          ← push-test {status}   пробный пуш себе; status — ответ пуш-сервиса
   → ice                        ← ice {servers, ttl}   STUN/TURN для звонка с временным логином
   ← msg {id, mailbox, payload, ts}
   → ack {mailbox, ids:[...]}
@@ -38,7 +38,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from .blobs import BlobFiles, add_blob_routes, cleanup_blobs
 from .config import Settings, settings as default_settings
-from .push import Pusher, PushSend, endpoint_allowed
+from .push import KINDS, Pusher, PushSend, endpoint_allowed, keys_valid
 from .store import RegisterResult, Store
 
 log = logging.getLogger("temp_messenger")
@@ -284,8 +284,11 @@ def create_app(cfg: Settings = default_settings, push_send: PushSend | None = No
             payload = frame.get("payload")
             if not isinstance(payload, str) or len(payload.encode()) > cfg.max_payload_bytes:
                 raise ProtocolError("bad_payload", msg_id)
-            # notify: true — сообщение стоит уведомления (не квитанция и не служебное).
-            notify = frame.get("notify") is True
+            # notify — сообщение стоит уведомления (не квитанция и не служебное): true — обычное,
+            # "call" — приглашение к звонку, "call-end" — звонок закончился без ответа.
+            notify = frame.get("notify")
+            if not isinstance(notify, (bool, str)) or notify not in KINDS:
+                notify = None
             # ttl — сколько секунд хранить, если получатель не в сети (сигналы звонка живут секунды)
             ttl = frame.get("ttl", cfg.message_ttl_sec)
             if not isinstance(ttl, int) or isinstance(ttl, bool) or ttl < 1:
@@ -303,7 +306,7 @@ def create_app(cfg: Settings = default_settings, push_send: PushSend | None = No
                     online = bool(hub.subs.get(raw))
                     await hub.push(raw, {"t": "msg", "id": msg_id, "mailbox": raw, "payload": payload, "ts": now})
                     if notify:
-                        pusher.notify(raw, msg_id, online)
+                        pusher.notify(raw, msg_id, online, notify)
                 elif res != "duplicate":
                     failed.append({"to": raw, "reason": res})
             await conn.send({"t": "sent", "id": msg_id, "failed": failed})
@@ -321,7 +324,13 @@ def create_app(cfg: Settings = default_settings, push_send: PushSend | None = No
             endpoint = frame.get("endpoint")
             if not endpoint_allowed(endpoint, cfg.push_hosts):
                 raise ProtocolError("bad_endpoint")
-            store.push_set(conn.owner, endpoint)
+            p256dh, auth = frame.get("p256dh"), frame.get("auth")
+            if p256dh is None and auth is None:
+                store.push_set(conn.owner, endpoint)  # клиент прежней версии: пуши будут пустыми
+            elif keys_valid(p256dh, auth):
+                store.push_set(conn.owner, endpoint, p256dh, auth)
+            else:
+                raise ProtocolError("bad_keys")
             await conn.send({"t": "push-sub", "ok": True})
 
         elif t == "push-unsub":
@@ -337,7 +346,10 @@ def create_app(cfg: Settings = default_settings, push_send: PushSend | None = No
         elif t == "push-test":
             # Пробный пуш самому себе: клиент показывает ответ пуш-сервиса, чтобы было видно,
             # на каком шаге теряются уведомления.
-            status = await pusher.deliver(conn.owner)
+            kind = frame.get("kind", True)
+            if not isinstance(kind, (bool, str)) or kind not in KINDS:
+                raise ProtocolError("bad_kind")
+            status = await pusher.deliver(conn.owner, kind)
             if status is None:
                 raise ProtocolError("no_subscription")
             await conn.send({"t": "push-test", "status": status})

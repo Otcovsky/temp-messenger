@@ -46,7 +46,9 @@ CREATE INDEX IF NOT EXISTS blobs_owner ON blobs(owner);
 CREATE TABLE IF NOT EXISTS push_subs (
     owner       TEXT PRIMARY KEY,
     endpoint    TEXT NOT NULL,          -- адрес у пуш-сервиса браузера
-    created_at  INTEGER NOT NULL
+    created_at  INTEGER NOT NULL,
+    p256dh      TEXT,                   -- ключи подписки (base64url): ими шифруется пометка в пуше;
+    auth        TEXT                    -- NULL — подписка от прежней версии клиента, пуши ей пустые
 );
 
 -- Настройки самого сервера (например, ключ VAPID).
@@ -65,6 +67,13 @@ class StoredMessage:
     created_at: int
 
 
+@dataclass
+class PushSub:
+    endpoint: str
+    p256dh: str | None
+    auth: str | None
+
+
 class RegisterResult:
     CREATED = "created"
     OK = "ok"
@@ -81,6 +90,10 @@ class Store:
         cols = {r[1] for r in self.db.execute("PRAGMA table_info(mailboxes)")}
         if "invite" not in cols:  # база от прежней версии
             self.db.execute("ALTER TABLE mailboxes ADD COLUMN invite INTEGER")
+        cols = {r[1] for r in self.db.execute("PRAGMA table_info(push_subs)")}
+        if "p256dh" not in cols:  # база от версии с пустыми пушами
+            self.db.execute("ALTER TABLE push_subs ADD COLUMN p256dh TEXT")
+            self.db.execute("ALTER TABLE push_subs ADD COLUMN auth TEXT")
 
     def close(self) -> None:
         self.db.close()
@@ -186,17 +199,19 @@ class Store:
 
     # --- пуш-подписки и настройки ---------------------------------------
 
-    def push_set(self, owner: str, endpoint: str, now: int | None = None) -> None:
+    def push_set(
+        self, owner: str, endpoint: str, p256dh: str | None = None, auth: str | None = None, now: int | None = None
+    ) -> None:
         self.db.execute(
-            "INSERT INTO push_subs(owner, endpoint, created_at) VALUES (?,?,?) "
-            "ON CONFLICT(owner) DO UPDATE SET endpoint=excluded.endpoint, created_at=excluded.created_at "
-            "WHERE endpoint<>excluded.endpoint",
-            (owner, endpoint, now or int(time.time())),
+            "INSERT INTO push_subs(owner, endpoint, created_at, p256dh, auth) VALUES (?,?,?,?,?) "
+            "ON CONFLICT(owner) DO UPDATE SET endpoint=excluded.endpoint, created_at=excluded.created_at, "
+            "p256dh=excluded.p256dh, auth=excluded.auth",
+            (owner, endpoint, now or int(time.time()), p256dh, auth),
         )
 
-    def push_get(self, owner: str) -> str | None:
-        row = self.db.execute("SELECT endpoint FROM push_subs WHERE owner=?", (owner,)).fetchone()
-        return row[0] if row else None
+    def push_get(self, owner: str) -> PushSub | None:
+        row = self.db.execute("SELECT endpoint, p256dh, auth FROM push_subs WHERE owner=?", (owner,)).fetchone()
+        return PushSub(*row) if row else None
 
     def push_delete(self, owner: str, endpoint: str | None = None) -> None:
         """endpoint задан — удалить, только если подписка всё ещё эта (её могли успеть заменить)."""

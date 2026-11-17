@@ -73,7 +73,7 @@ const REGISTER_TIMEOUT_MS = 8_000
 const HANDLED_MAX = 2_000
 const NO_CONNECTION = 'Нет связи с сервером. Попробуйте ещё раз, когда связь появится.'
 /** Типы содержимого, о которых получателю стоит показать уведомление */
-const NOTIFY_TYPES = new Set(['hello', 'text', 'file', 'call-offer'])
+const NOTIFY_TYPES = new Set(['hello', 'text', 'file'])
 /** Сколько секунд живёт сигнал звонка: дольше вызов всё равно не длится */
 export const CALL_SIGNAL_TTL_SEC = 60
 const ICE_TIMEOUT_MS = 4_000
@@ -249,13 +249,13 @@ export class Messenger {
   }
 
   /** Сообщить серверу адрес пуш-подписки этого браузера; null — отписаться. */
-  setPushEndpoint(endpoint: string | null): boolean {
-    return this.transport?.send(endpoint ? { t: 'push-sub', endpoint } : { t: 'push-unsub' }) ?? false
+  setPushEndpoint(sub: { endpoint: string; p256dh?: string; auth?: string } | null): boolean {
+    return this.transport?.send(sub ? { t: 'push-sub', ...sub } : { t: 'push-unsub' }) ?? false
   }
 
   /** Попросить сервер прислать пробный пуш на этот браузер; ответ придёт в onPush как test. */
-  testPush(): boolean {
-    return this.transport?.send({ t: 'push-test' }) ?? false
+  testPush(kind?: 'call'): boolean {
+    return this.transport?.send({ t: 'push-test', ...(kind ? { kind } : {}) }) ?? false
   }
 
   /** Удалить всё: сообщить собеседникам, закрыть ящики на сервере, стереть базу. */
@@ -329,7 +329,7 @@ export class Messenger {
         break
       case 'error':
         console.warn('Ошибка сервера:', f.code, f.ref ?? '')
-        if (f.code === 'bad_endpoint' || f.code === 'push_disabled' || f.code === 'no_subscription')
+        if (['bad_endpoint', 'bad_keys', 'push_disabled', 'no_subscription'].includes(f.code))
           this.onPush?.({ t: 'result', ok: false, code: f.code })
         if (!f.ref) break
         if (this.inFlight.delete(f.ref)) setTimeout(() => void this.flushOutbox(), 3000)
@@ -350,7 +350,7 @@ export class Messenger {
       }
       const frame = {
         t: 'send', id: it.id, to: it.to, payload: it.payload,
-        ...(it.notify ? { notify: true } : {}),
+        ...(it.notify ? { notify: it.notify } : {}),
         ...(it.ttl ? { ttl: it.ttl } : {}),
       }
       if (!this.transport.send(frame)) break
@@ -743,11 +743,19 @@ export class Messenger {
       const r = await ratchetEncrypt(sess.state, encodeContent(content))
       const payload = encodePayload(r.header, r.ciphertext, sess.preKey)
       const to = contact.theirMailbox
+      // О звонке получателю придёт отдельное, «звонящее» уведомление. Конец звонка без срока
+      // хранения — это «вам звонили и не дождались»: его тоже стоит показать.
+      const notify =
+        content.type === 'call-offer'
+          ? 'call'
+          : content.type === 'call-end'
+            ? !ttl && 'call-end'
+            : NOTIFY_TYPES.has(content.type)
       await writeAll(this.db, ['sessions', 'outbox'], (tx) => [
         tx.objectStore('sessions').put({ ...sess, state: r.state }),
         tx.objectStore('outbox').put({
           id: content.id, to: [to], payload, createdAt: Date.now(), msgId,
-          ...(NOTIFY_TYPES.has(content.type) ? { notify: true } : {}),
+          ...(notify ? { notify } : {}),
           ...(ttl ? { ttl } : {}),
         }),
       ])

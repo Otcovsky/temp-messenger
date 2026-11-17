@@ -13,7 +13,7 @@
 import { useSyncExternalStore } from 'react'
 import { randomId } from '../crypto/bytes'
 import type { CallContent, CallEndReason } from '../protocol/envelope'
-import { notifyIfHidden } from '../push'
+import { callAlert } from '../push'
 import type { CallInfo, Contact } from '../storage/db'
 import type { Messenger } from './messenger'
 
@@ -191,8 +191,8 @@ function startTone(kind: 'ring' | 'ringback') {
   }
   const play = () => {
     if (kind === 'ring') {
-      beep(880, 0, 0.35, 0.18)
-      beep(1100, 0.45, 0.35, 0.18)
+      beep(880, 0, 0.35, 0.55)
+      beep(1100, 0.45, 0.35, 0.55)
       navigator.vibrate?.([350, 100, 350])
     } else {
       beep(425, 0, 1, 0.06)
@@ -357,6 +357,7 @@ function finish(s: Session, end: Ending) {
   s.timers.forEach(clearTimeout)
   clearTimeout(s.flushTimer)
   stopTone()
+  if (!s.mine) callAlert(end.outcome === 'missed' ? 'missed' : 'stop')
   if (s.pc) {
     s.pc.ontrack = s.pc.onicecandidate = s.pc.onconnectionstatechange = null
     s.pc.close()
@@ -439,6 +440,7 @@ export async function acceptCall(): Promise<void> {
   s.answered = true
   s.timers.forEach(clearTimeout)
   stopTone()
+  callAlert('stop')
   unlockAudio()
   patch({ phase: 'connecting' })
   try {
@@ -517,7 +519,7 @@ async function onSignal(contact: Contact, c: CallContent): Promise<void> {
       const s = newSession(id, contact, false)
       s.offer = sdp
       startTone('ring')
-      void notifyIfHidden('Входящий звонок')
+      callAlert('ring')
       later(s, INCOMING_MS, () => finish(s, { outcome: 'missed', note: 'Пропущенный звонок' }))
       return
     }
@@ -558,6 +560,7 @@ async function onSignal(contact: Contact, c: CallContent): Promise<void> {
         // Звонок, которого я не видел: предложение истекло, пока меня не было в сети.
         // Запись о своём звонке с этим id уже есть — тогда addCallRecord ничего не изменит.
         if (reason === 'timeout' || reason === 'hangup') {
+          callAlert('missed')
           return m.addCallRecord(contact.id, id, false, c.ts, { outcome: 'missed' })
         }
         return
