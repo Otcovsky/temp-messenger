@@ -60,6 +60,11 @@ export interface PendingInvite {
   ephemeral: KeyPair
   payload: InvitePayload
   createdAt: number
+  /**
+   * Это не ссылка для человека, а «знакомство» с участником группы: приглашение ушло ему через
+   * администратора. gid — группа, ik — ключ личности того, от кого ждём ответа (другому не поверим).
+   */
+  group?: { gid: string; ik: string }
 }
 
 export async function createInvite(id: Identity, name?: string): Promise<PendingInvite> {

@@ -134,7 +134,51 @@ export type CallContent =
   | CallMediaContent
   | CallEndContent
 
-export type Content = TextContent | FileContent | HelloContent | ReceiptContent | GoodbyeContent | CallContent
+/**
+ * Группы (docs/protocol.md, «Группы»). Групповое сообщение — обычное text или file с полем conv
+ * (id группы), зашифрованное отдельно для каждого участника его парным каналом. Ниже — служебные.
+ */
+export interface GroupMemberInfo {
+  ik: string
+  name: string
+}
+
+/** Состояние группы целиком. Шлёт только администратор — при создании и при каждой правке. */
+export interface GroupStateContent extends Base {
+  type: 'group-state'
+  conv: string
+  /** members — все участники, включая администратора и получателя */
+  body: { name: string; admin: string; rev: number; members: GroupMemberInfo[] }
+}
+
+/**
+ * Знакомство двух участников, у которых ещё нет парного канала. Участник шлёт администратору
+ * приглашение для другого (for — чей ключ), администратор пересылает адресату (from — от кого).
+ */
+export interface GroupIntroContent extends Base {
+  type: 'group-intro'
+  conv: string
+  /** invite — приглашение в том же виде, что в ссылке (base64url от JSON) */
+  body: { for?: string; from?: string; invite: string }
+}
+
+/** Участник вышел. Если выходит администратор, admin — кому он передаёт управление. */
+export interface GroupLeaveContent extends Base {
+  type: 'group-leave'
+  conv: string
+  body: { admin?: string }
+}
+
+export type GroupContent = GroupStateContent | GroupIntroContent | GroupLeaveContent
+
+export type Content =
+  | TextContent
+  | FileContent
+  | HelloContent
+  | ReceiptContent
+  | GoodbyeContent
+  | CallContent
+  | GroupContent
 
 export function encodeContent(c: Content): Bytes {
   return pad(utf8(JSON.stringify(c)))
@@ -150,4 +194,5 @@ export function decodeContent(b: Bytes): Content | null {
 
 const KNOWN_TYPES = new Set([
   'text', 'file', 'hello', 'receipt', 'goodbye', 'call-offer', 'call-answer', 'call-ice', 'call-media', 'call-end',
+  'group-state', 'group-intro', 'group-leave',
 ])

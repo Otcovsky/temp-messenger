@@ -1,7 +1,8 @@
-import { ChevronRight, KeyRound, MessageCirclePlus, ScanQrCode, Trash2, UserPlus } from 'lucide-react'
+import { ChevronRight, KeyRound, MessageCirclePlus, ScanQrCode, Trash2, UserPlus, Users } from 'lucide-react'
 import { useState } from 'react'
 import { Avatar } from './Avatar'
 import { CallsSection } from './CallUi'
+import { CreateGroupDialog } from './GroupUi'
 import { CreateInviteDialog, JoinDialog } from './InviteDialogs'
 import { useLive, useMessenger } from './hooks'
 import { Modal } from './Modal'
@@ -28,7 +29,7 @@ export function Sidebar({
 }) {
   const m = useMessenger()
   const conversations = useLive((m) => m.conversations(), [])
-  const [dialog, setDialog] = useState<'new' | 'invite' | 'join' | 'settings' | null>(null)
+  const [dialog, setDialog] = useState<'new' | 'invite' | 'join' | 'group' | 'settings' | null>(null)
   const close = () => setDialog(null)
   const status = STATUS[m.status]
 
@@ -72,7 +73,14 @@ export function Sidebar({
                 className={`flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition active:scale-[0.99] ${isActive ? 'bg-brand-soft' : 'hover:bg-slate-900/[0.03] active:bg-slate-900/5 dark:hover:bg-white/[0.04] dark:active:bg-white/8'}`}
                 onClick={() => onSelect(c.id)}
               >
-                <Avatar name={c.title} />
+                <span className="relative shrink-0">
+                  <Avatar name={c.title} />
+                  {c.kind === 'group' && (
+                    <span className="absolute -right-0.5 -bottom-0.5 grid size-5.5 place-items-center rounded-full bg-white text-violet-600 shadow ring-1 ring-slate-200 dark:bg-surface-2-dark dark:text-violet-300 dark:ring-white/10">
+                      <Users className="size-3.5" aria-label="Группа" />
+                    </span>
+                  )}
+                </span>
                 <span className="flex min-w-0 flex-col flex-1 gap-0.5">
                   <span className="flex items-baseline gap-2">
                     <b className="flex-1 truncate text-base font-semibold">{c.title}</b>
@@ -106,7 +114,21 @@ export function Sidebar({
       </button>
 
       {dialog === 'new' && (
-        <NewChatDialog onClose={close} onInvite={() => setDialog('invite')} onJoin={() => setDialog('join')} />
+        <NewChatDialog
+          onClose={close}
+          onInvite={() => setDialog('invite')}
+          onJoin={() => setDialog('join')}
+          onGroup={() => setDialog('group')}
+        />
+      )}
+      {dialog === 'group' && (
+        <CreateGroupDialog
+          onClose={close}
+          onCreated={(gid) => {
+            close()
+            onSelect(gid)
+          }}
+        />
       )}
       {dialog === 'invite' && <CreateInviteDialog onClose={close} />}
       {dialog === 'join' && <JoinDialog onClose={close} />}
@@ -140,7 +162,17 @@ function EmptyList({ onInvite, onJoin }: { onInvite: () => void; onJoin: () => v
   )
 }
 
-function NewChatDialog({ onClose, onInvite, onJoin }: { onClose: () => void; onInvite: () => void; onJoin: () => void }) {
+function NewChatDialog({
+  onClose,
+  onInvite,
+  onJoin,
+  onGroup,
+}: {
+  onClose: () => void
+  onInvite: () => void
+  onJoin: () => void
+  onGroup: () => void
+}) {
   return (
     <Modal title="Новый чат" onClose={onClose}>
       <div className="grid gap-2.5">
@@ -156,6 +188,12 @@ function NewChatDialog({ onClose, onInvite, onJoin }: { onClose: () => void; onI
           title="Присоединиться"
           text="По ссылке или QR-коду собеседника"
           onClick={onJoin}
+        />
+        <ChoiceRow
+          icon={<Users className="size-6" />}
+          title="Новая группа"
+          text="Общий чат с несколькими собеседниками"
+          onClick={onGroup}
         />
       </div>
     </Modal>

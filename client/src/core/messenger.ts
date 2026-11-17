@@ -13,6 +13,7 @@ import {
   type PendingInvite,
   acceptInvite as acceptInviteCrypto,
   completeInvite,
+  decodeInvite,
   createInvite as createInviteCrypto,
   encodeInvite,
   safetyNumber,
@@ -22,6 +23,10 @@ import { type RatchetState, ratchetDecrypt, ratchetEncrypt } from '../crypto/rat
 import {
   type CallContent,
   type Content,
+  type GroupIntroContent,
+  type GroupLeaveContent,
+  type GroupMemberInfo,
+  type GroupStateContent,
   decodeContent,
   decodePayload,
   encodeContent,
@@ -33,6 +38,7 @@ import {
   type Conversation,
   type DB,
   type FileInfo,
+  type GroupInfo,
   type Message,
   type MessageStatus,
   type Profile,
@@ -65,6 +71,11 @@ const BLOB_ID_RE = MAILBOX_RE
 const FILE_KEY_RE = /^[A-Za-z0-9_-]{43}$/
 /** id из 16 случайных байт в base64url (randomId) */
 const ID_RE = /^[A-Za-z0-9_-]{22}$/
+/** Ключ личности: 32 байта в base64url */
+const IK_RE = /^[A-Za-z0-9_-]{43}$/
+/** Самая большая группа: каждое сообщение шифруется отдельно для каждого участника */
+export const MAX_GROUP = 50
+const NAME_MAX = 64
 /** Через сколько повторить передачу файла после сбоя связи, если соединение с сервером живо */
 const TRANSFER_RETRY_MS = 20_000
 const PROBE_TIMEOUT_MS = 10_000
@@ -142,6 +153,12 @@ export class Messenger {
           | { t: 'incoming' },
       ) => void)
     | null = null
+  private lastNoteTs = 0
+  /**
+   * Id конвертов, которые сервер только что принял. Между его ответом и удалением записи из
+   * очереди проходит мгновение — без этой пометки параллельная отправка послала бы конверт ещё раз.
+   */
+  private accepted = new Set<string>()
   /** Растёт при каждом изменении — UI по нему перечитывает данные */
   version = 0
 
@@ -222,7 +239,7 @@ export class Messenger {
   private async repair() {
     let changed = false
     for (const c of await this.db.getAll('contacts')) {
-      if (await this.db.get('conversations', c.id)) continue
+      if (c.groupOnly || (await this.db.get('conversations', c.id))) continue
       if (await this.db.get('sessions', c.id)) {
         await this.db.put('conversations', newConversation(c))
       } else {
@@ -262,6 +279,9 @@ export class Messenger {
   async wipeAll(): Promise<void> {
     try {
       this.setPushEndpoint(null)
+      for (const g of await this.db.getAll('conversations')) {
+        if (g.group && !g.group.left) await this.announceLeave(g).catch(() => {})
+      }
       const contacts = await this.db.getAll('contacts')
       await Promise.all(contacts.map((c) => this.sendGoodbye(c).catch(() => {})))
       await this.flushOutbox()
@@ -282,6 +302,10 @@ export class Messenger {
     for (const r of await mailboxRegistrations(this.db)) this.transport?.send({ t: 'register', ...r })
     for (const mailbox of await pendingUnregisters(this.db)) this.transport?.send({ t: 'unregister', mailbox })
     await this.flushOutbox()
+    // Знакомство с участниками групп могло оборваться (не было связи) — пробуем довести
+    for (const g of await this.db.getAll('conversations')) {
+      if (g.group && !g.group.left) void this.linkGroup(g.id).catch(() => {})
+    }
     this.onPush?.({ t: 'ready' })
     void this.resumeTransfers().catch((e) => console.warn('Не удалось возобновить передачу файлов', e))
   }
@@ -343,7 +367,7 @@ export class Messenger {
     if (!this.transport?.isReady) return
     const items = await this.db.getAllFromIndex('outbox', 'byCreated')
     for (const it of items) {
-      if (this.inFlight.has(it.id)) continue
+      if (this.inFlight.has(it.id) || this.accepted.has(it.id)) continue
       if (it.ttl && Date.now() > it.createdAt + it.ttl * 1000) {
         await this.db.delete('outbox', it.id) // сигнал звонка устарел, пока не было связи
         continue
@@ -359,6 +383,8 @@ export class Messenger {
   }
 
   private async onSent(id: string, failed: { to: string; reason: string }[]) {
+    this.accepted.add(id)
+    if (this.accepted.size > HANDLED_MAX) this.accepted.delete(this.accepted.values().next().value!)
     this.inFlight.delete(id)
     const item = await this.db.get('outbox', id)
     if (!item) return
@@ -371,7 +397,13 @@ export class Messenger {
         }
       }
     }
-    if (item.msgId) await this.updateStatus(item.msgId, failed.length ? 'failed' : 'sent')
+    if (item.msgId) {
+      const { msgId } = item
+      // У группового сообщения копия на каждого участника: «отправлено» — когда ушли все.
+      // Отказ по одной копии (участник пропал) сообщение неотправленным не делает.
+      const more = item.group && (await this.db.getAll('outbox')).some((o) => o.msgId === msgId)
+      if (!more) await this.updateStatus(msgId, failed.length && !item.group ? 'failed' : 'sent')
+    }
     this.emit()
   }
 
@@ -413,8 +445,9 @@ export class Messenger {
     return new Error(NO_ANSWER)
   }
 
-  listInvites(): Promise<PendingInvite[]> {
-    return this.db.getAll('invites')
+  /** Приглашения-ссылки, которые ещё никто не принял (без служебных «знакомств» по группе). */
+  async listInvites(): Promise<PendingInvite[]> {
+    return (await this.db.getAll('invites')).filter((i) => !i.group)
   }
 
   async cancelInvite(mailbox: string): Promise<void> {
@@ -481,6 +514,7 @@ export class Messenger {
     const contact: Contact = {
       id: randomId(),
       name: invite.n?.trim() || 'Без имени',
+      ...(invite.n?.trim() ? { selfName: invite.n.trim() } : {}),
       myMailbox: randomId(),
       theirMailbox: invite.m,
       ik: invite.ik,
@@ -505,23 +539,52 @@ export class Messenger {
 
   // --- отправка ------------------------------------------------------------
 
-  private async directChat(convId: string): Promise<{ conv: Conversation; contact: Contact }> {
+  /** Беседа и те, кому в неё писать: собеседник или участники группы, с которыми есть канал. */
+  private async chat(convId: string): Promise<{ conv: Conversation; targets: Contact[] }> {
     const conv = await this.db.get('conversations', convId)
-    const contact = conv && (await this.db.get('contacts', conv.members[0]))
-    if (!conv || !contact) throw new Error('Беседа не найдена')
-    return { conv, contact }
+    if (!conv) throw new Error('Беседа не найдена')
+    if (conv.group) {
+      if (conv.group.left) throw new Error('Вы больше не участник этой группы')
+      const targets = await this.groupTargets(conv.group)
+      if (!targets.length) throw new Error('В группе пока некому писать: участники ещё подключаются')
+      return { conv, targets }
+    }
+    const contact = await this.db.get('contacts', conv.members[0])
+    if (!contact) throw new Error('Беседа не найдена')
+    return { conv, targets: [contact] }
+  }
+
+  /**
+   * Отправить содержимое в беседу. В группе каждый участник получает свою копию, зашифрованную
+   * его парным каналом; id сообщения у копий общий, id конверта у каждой свой.
+   */
+  private async sendToChat(conv: Conversation, targets: Contact[], content: Content, msgId?: string): Promise<void> {
+    if (!conv.group) return this.sendContent(targets[0], content, msgId)
+    const results = await Promise.allSettled(
+      targets.map((c) => this.sendContent(c, { ...content, conv: conv.id }, msgId, undefined, randomId())),
+    )
+    const failed = results.filter((r) => r.status === 'rejected')
+    if (failed.length === results.length) throw (failed[0] as PromiseRejectedResult).reason
+  }
+
+  /** Обновить строку беседы в списке чатов, не затирая то, что в ней успело измениться. */
+  private async touchConversation(convId: string, patch: Partial<Conversation>): Promise<void> {
+    await transact(this.db, ['conversations'], async (tx) => {
+      const cur = await tx.objectStore('conversations').get(convId)
+      if (cur) await tx.objectStore('conversations').put({ ...cur, ...patch })
+    })
   }
 
   async sendText(convId: string, text: string): Promise<void> {
     text = text.trim().slice(0, MAX_TEXT)
     if (!text) return
-    const { conv, contact } = await this.directChat(convId)
+    const { conv, targets } = await this.chat(convId)
     const msg: Message = { id: randomId(), conv: convId, from: 'me', ts: Date.now(), type: 'text', text, status: 'pending' }
     await this.db.put('messages', msg)
-    await this.db.put('conversations', { ...conv, lastTs: msg.ts, lastText: text })
+    await this.touchConversation(convId, { lastTs: msg.ts, lastText: text })
     this.emit()
     try {
-      await this.sendContent(contact, { id: msg.id, ts: msg.ts, type: 'text', body: { text } }, msg.id)
+      await this.sendToChat(conv, targets, { id: msg.id, ts: msg.ts, type: 'text', body: { text } }, msg.id)
     } catch (e) {
       await this.updateStatus(msg.id, 'failed')
       this.emit()
@@ -548,8 +611,8 @@ export class Messenger {
       if (file.size > MAX_FILE) throw new Error(`«${name}» больше ${MAX_FILE / 1024 / 1024} МБ, такие файлы отправить нельзя.`)
       if (!file.size) throw new Error(`«${name}» — пустой файл.`)
     }
-    const { conv, contact } = await this.directChat(convId)
-    if (!contact.theirMailbox || contact.gone) throw new Error('Собеседнику больше нельзя писать')
+    const { conv, targets } = await this.chat(convId)
+    if (!conv.group && (!targets[0].theirMailbox || targets[0].gone)) throw new Error('Собеседнику больше нельзя писать')
     const text = caption.trim().slice(0, MAX_TEXT)
     const album = files.length > 1 ? randomId() : undefined
     const now = Date.now()
@@ -570,11 +633,11 @@ export class Messenger {
     }
     const lastMsg = batch[batch.length - 1].msg
     // Вся пачка появляется в чате сразу, загрузка идёт следом
-    await writeAll(this.db, ['messages', 'files', 'conversations'], (tx) => [
+    await writeAll(this.db, ['messages', 'files'], (tx) => [
       ...batch.map(({ msg }) => tx.objectStore('messages').put(msg)),
       ...batch.map(({ msg, data }) => tx.objectStore('files').put({ id: msg.id, data })),
-      tx.objectStore('conversations').put({ ...conv, lastTs: lastMsg.ts, lastText: fileLabel(lastMsg.file!.name, text) }),
     ])
+    await this.touchConversation(convId, { lastTs: lastMsg.ts, lastText: fileLabel(lastMsg.file!.name, text) })
     this.emit()
     let failure: unknown
     for (const { msg } of batch) {
@@ -655,19 +718,20 @@ export class Messenger {
     try {
       const msg = await this.db.get('messages', msgId)
       if (!msg?.file || msg.transfer !== 'up') return
-      const contact = await this.db.get('contacts', msg.conv)
+      const chat = await this.chat(msg.conv).catch(() => null)
       const stored = await this.db.get('files', msgId)
-      if (!contact || !stored) return await this.finishUpload(msgId, true)
+      if (!chat || !stored) return await this.finishUpload(msgId, true)
       const { blob, key, size, name, mime } = msg.file
       try {
         const ct = await encryptFile(b64d(key), new Uint8Array(stored.data))
-        await putBlob(blob, ct, 1, this.auth!)
+        // В группе файл загружается один раз, а скачать его должен каждый участник
+        await putBlob(blob, ct, chat.targets.length, this.auth!)
         const body = {
           blob, key, size, name, mime,
           ...(msg.text ? { caption: msg.text } : {}),
           ...(msg.album ? { album: msg.album } : {}),
         }
-        await this.sendContent(contact, { id: msg.id, ts: msg.ts, type: 'file', body }, msg.id)
+        await this.sendToChat(chat.conv, chat.targets, { id: msg.id, ts: msg.ts, type: 'file', body }, msg.id)
       } catch (e) {
         if (e instanceof BlobError && !e.permanent) {
           this.retryLater(() => this.upload(msgId))
@@ -735,7 +799,8 @@ export class Messenger {
     this.emit()
   }
 
-  private sendContent(contact: Contact, content: Content, msgId?: string, ttl?: number): Promise<void> {
+  /** envId — id конверта, если он должен отличаться от id содержимого (копии группового сообщения). */
+  private sendContent(contact: Contact, content: Content, msgId?: string, ttl?: number, envId?: string): Promise<void> {
     return this.serial(async () => {
       if (!contact.theirMailbox || contact.gone) throw new Error('Собеседнику больше нельзя писать')
       const sess = await this.db.get('sessions', contact.id)
@@ -754,9 +819,10 @@ export class Messenger {
       await writeAll(this.db, ['sessions', 'outbox'], (tx) => [
         tx.objectStore('sessions').put({ ...sess, state: r.state }),
         tx.objectStore('outbox').put({
-          id: content.id, to: [to], payload, createdAt: Date.now(), msgId,
+          id: envId ?? content.id, to: [to], payload, createdAt: Date.now(), msgId,
           ...(notify ? { notify } : {}),
           ...(ttl ? { ttl } : {}),
+          ...(envId ? { group: true } : {}),
         }),
       ])
     }).then(() => this.flushOutbox())
@@ -805,9 +871,15 @@ export class Messenger {
       }
       const { hello } = opened
       if (hello?.type !== 'hello' || !MAILBOX_RE.test(hello.body?.mailbox)) return
+      // «Знакомство» по группе: приглашение предназначалось одному участнику — другому не верим
+      const intro = invite.group
+      if (intro && opened.theirIk !== intro.ik) return
+      const said = String(hello.body.name || '').trim().slice(0, NAME_MAX)
       const created: Contact = {
         id: randomId(),
-        name: String(hello.body.name || '').trim().slice(0, 64) || 'Без имени',
+        name: said || (intro ? 'Участник' : 'Без имени'),
+        ...(said ? { selfName: said } : {}),
+        ...(intro ? { groupOnly: true } : {}),
         myMailbox: mailbox,
         theirMailbox: hello.body.mailbox,
         ik: opened.theirIk,
@@ -818,7 +890,8 @@ export class Messenger {
         tx.objectStore('invites').delete(mailbox), // приглашение одноразовое
         tx.objectStore('contacts').put(created),
         tx.objectStore('sessions').put({ contactId: created.id, state: opened.state }),
-        tx.objectStore('conversations').put(newConversation(created)),
+        // Знакомому только по группе личный чат не заводим
+        ...(intro ? [] : [tx.objectStore('conversations').put(newConversation(created))]),
       ])
       // Ящик теперь обычный: повторно открытая ссылка не создаст «мёртвый» чат
       this.transport?.send({ t: 'register', mailbox, invite: false })
@@ -900,11 +973,19 @@ export class Messenger {
         return
       case 'hello':
         return // повторный hello по уже установленной сессии — игнорируем
+      case 'group-state':
+        return this.applyGroupState(tx, contact, c)
+      case 'group-leave':
+        return this.applyGroupLeave(tx, contact, c)
+      case 'group-intro':
+        return () => void this.onGroupIntro(contact, c).catch((e) => console.warn('Знакомство по группе не удалось', e))
       case 'call-offer':
       case 'call-answer':
       case 'call-ice':
       case 'call-media':
       case 'call-end':
+        // Сигнал с conv — групповой звонок: формат зарезервирован, но этот клиент их не умеет
+        if (c.conv) return
         if (!c.body || typeof c.body.call !== 'string' || !ID_RE.test(c.body.call)) return
         return () => this.onCall?.(contact, c)
     }
@@ -921,16 +1002,37 @@ export class Messenger {
     const messages = tx.objectStore('messages')
     const conversations = tx.objectStore('conversations')
     if (await messages.get(c.id)) return
-    const conv = await conversations.get(contact.id)
-    if (!conv) return
+    let conv: Conversation | undefined
+    if (c.conv) {
+      // Групповое: принимаем только от участника группы, в которой состоим сами
+      conv = await conversations.get(c.conv)
+      if (!conv?.group || conv.group.left || !inGroup(conv.group, contact.ik)) return
+    } else {
+      conv = await conversations.get(contact.id)
+      if (!conv && contact.groupOnly) {
+        // Знакомый по группе написал лично — с этого момента у нас есть и личный чат
+        const { groupOnly: _groupOnly, ...direct } = contact
+        contact = direct
+        await tx.objectStore('contacts').put(contact)
+        conv = newConversation(contact)
+      }
+      if (!conv) return
+    }
+    const group = !!conv.group
     const isOpen = this.activeConv === conv.id && document.visibilityState === 'visible'
-    await messages.put({ id: c.id, conv: conv.id, from: contact.id, ts: c.ts, status: 'received', readSent: isOpen, ...fields })
+    await messages.put({
+      // В группе квитанции не шлём (их пришлось бы рассылать каждому), так что и ждать их отправки незачем
+      id: c.id, conv: conv.id, from: contact.id, ts: c.ts, status: 'received', readSent: isOpen || group,
+      ...(group ? { fromName: contact.name } : {}),
+      ...fields,
+    })
     await conversations.put({
-      ...conv, lastTs: Math.max(conv.lastTs, c.ts), lastText: preview, unread: isOpen ? 0 : conv.unread + 1,
+      ...conv, lastTs: Math.max(conv.lastTs, c.ts), lastText: group ? `${contact.name}: ${preview}` : preview,
+      unread: isOpen ? 0 : conv.unread + 1,
     })
     return () => {
       // Без await: мы внутри serial(), а отправка сама встаёт в ту же очередь
-      void this.sendReceipt(contact, isOpen ? 'read' : 'delivered', [c.id])
+      if (!group) void this.sendReceipt(contact, isOpen ? 'read' : 'delivered', [c.id])
       this.onPush?.({ t: 'incoming' })
       if (fields.transfer === 'down') void this.download(c.id)
     }
@@ -993,34 +1095,40 @@ export class Messenger {
 
   async markRead(convId: string): Promise<void> {
     const conv = await this.db.get('conversations', convId)
-    const contact = await this.db.get('contacts', convId)
-    if (!conv || !contact) return
+    const contact = conv?.group ? undefined : await this.db.get('contacts', convId)
+    if (!conv || (!contact && !conv.group)) return
     const unreadMsgs = (await listMessages(this.db, convId)).filter((m) => m.from !== 'me' && !m.readSent)
     if (!unreadMsgs.length && !conv.unread) return
-    await transact(this.db, ['messages'], async (tx) => {
+    await transact(this.db, ['messages', 'conversations'], async (tx) => {
       for (const { id } of unreadMsgs) {
         const cur = await tx.objectStore('messages').get(id)
         if (cur) await tx.objectStore('messages').put({ ...cur, readSent: true })
       }
+      const fresh = await tx.objectStore('conversations').get(convId)
+      if (fresh) await tx.objectStore('conversations').put({ ...fresh, unread: 0 })
     })
-    await this.db.put('conversations', { ...conv, unread: 0 })
     this.emit()
-    await this.sendReceipt(contact, 'read', unreadMsgs.map((m) => m.id))
+    if (contact) await this.sendReceipt(contact, 'read', unreadMsgs.map((m) => m.id))
   }
 
   async deleteConversation(convId: string): Promise<void> {
+    const conv = await this.db.get('conversations', convId)
+    if (conv?.group) return this.leaveGroup(convId)
     const contact = await this.db.get('contacts', convId)
-    if (contact) await this.sendGoodbye(contact).catch(() => {})
+    // Собеседник ещё и участник общей группы: канал с ним нужен, так что удаляется только переписка
+    const shared = !!contact && (await this.groupIks()).has(contact.ik)
+    if (contact && !shared) await this.sendGoodbye(contact).catch(() => {})
     const msgs = await listMessages(this.db, convId)
     await writeAll(this.db, ['contacts', 'sessions', 'conversations', 'messages', 'files'], (tx) => [
-      tx.objectStore('contacts').delete(convId),
-      tx.objectStore('sessions').delete(convId),
+      ...(shared
+        ? [tx.objectStore('contacts').put({ ...contact!, groupOnly: true })]
+        : [tx.objectStore('contacts').delete(convId), tx.objectStore('sessions').delete(convId)]),
       tx.objectStore('conversations').delete(convId),
       ...msgs.map((m) => tx.objectStore('messages').delete(m.id)),
       ...msgs.filter((m) => m.type === 'file').map((m) => tx.objectStore('files').delete(m.id)),
     ])
     // Ящик закрываем после удаления: если запись не удалась, чат остаётся рабочим
-    if (contact) await this.closeMailbox(contact.myMailbox)
+    if (contact && !shared) await this.closeMailbox(contact.myMailbox)
     this.emit()
   }
 
@@ -1046,11 +1154,410 @@ export class Messenger {
     return this.db.get('contacts', id)
   }
 
+  conversation(id: string): Promise<Conversation | undefined> {
+    return this.db.get('conversations', id)
+  }
+
+  /** Люди, которым можно писать: для выбора участников группы. Без повторов одного и того же человека. */
+  async people(): Promise<Contact[]> {
+    const byIk = new Map<string, Contact>()
+    for (const c of await this.db.getAll('contacts')) {
+      if (!usable(c)) continue
+      const have = byIk.get(c.ik)
+      if (!have || (have.groupOnly && !c.groupOnly)) byIk.set(c.ik, c)
+    }
+    return [...byIk.values()].sort((a, b) => a.name.localeCompare(b.name))
+  }
+
+  // --- группы ------------------------------------------------------------------
+  //
+  // Группа — список участников, который ведёт её администратор (создатель). Отдельного группового
+  // ключа нет: сообщение шифруется для каждого участника его парным каналом. Поэтому у каждой
+  // пары участников должен быть свой канал; незнакомых друг с другом сводит администратор.
+
+  private myIk(): string {
+    return b64e(this.identity!.dh.pub)
+  }
+
+  /** Контакт человека с таким ключом личности, которому можно писать (личный чат — в приоритете). */
+  private async contactByIk(ik: string): Promise<Contact | undefined> {
+    const found = (await this.db.getAll('contacts')).filter((c) => c.ik === ik && usable(c))
+    return found.find((c) => !c.groupOnly) ?? found[0]
+  }
+
+  /** Участники группы, с которыми уже есть канал. */
+  private async groupTargets(group: GroupInfo): Promise<Contact[]> {
+    const byIk = new Map<string, Contact>()
+    for (const c of await this.db.getAll('contacts')) {
+      if (!usable(c)) continue
+      const have = byIk.get(c.ik)
+      if (!have || (have.groupOnly && !c.groupOnly)) byIk.set(c.ik, c)
+    }
+    return group.roster.map((m) => byIk.get(m.ik)).filter((c): c is Contact => !!c)
+  }
+
+  /** Ключи всех, с кем я состою хотя бы в одной группе. */
+  private async groupIks(): Promise<Set<string>> {
+    const convs = await this.db.getAll('conversations')
+    return new Set(convs.filter((c) => c.group && !c.group.left).flatMap((c) => c.group!.roster.map((m) => m.ik)))
+  }
+
+  /** Служебная строка в ленте группы. Возвращает беседу с обновлённой строкой для списка чатов. */
+  private async note(tx: ReceiveTx | GroupTx, conv: Conversation, text: string, unread = false): Promise<Conversation> {
+    const t = tx as GroupTx
+    // Строки, записанные подряд, должны и в ленте идти в том же порядке — время строго растёт
+    const now = (this.lastNoteTs = Math.max(Date.now(), this.lastNoteTs + 1))
+    await t.objectStore('messages').put({
+      id: randomId(), conv: conv.id, from: '', ts: now, type: 'note', text, status: 'received', readSent: true,
+    })
+    const isOpen = this.activeConv === conv.id && document.visibilityState === 'visible'
+    const next = { ...conv, lastTs: now, lastText: text, unread: conv.unread + (unread && !isOpen ? 1 : 0) }
+    await t.objectStore('conversations').put(next)
+    return next
+  }
+
+  /** Создать группу из своих контактов. Возвращает её id. */
+  async createGroup(name: string, contactIds: string[]): Promise<string> {
+    name = name.trim().slice(0, NAME_MAX)
+    if (!name) throw new Error('Дайте группе название')
+    const roster = await this.rosterOf(contactIds)
+    if (!roster.length) throw new Error('Выберите хотя бы одного участника')
+    if (roster.length >= MAX_GROUP) throw new Error(`В группе может быть не больше ${MAX_GROUP} человек`)
+    const conv: Conversation = {
+      id: randomId(), kind: 'group', members: [], title: name, lastTs: Date.now(), lastText: '', unread: 0,
+      group: { admin: 'me', rev: 1, roster },
+    }
+    await transact(this.db, ['conversations', 'messages'], async (tx) => {
+      await this.note(tx, conv, 'Вы создали группу')
+    })
+    this.emit()
+    await this.broadcastGroup(conv)
+    return conv.id
+  }
+
+  private async rosterOf(contactIds: string[]): Promise<GroupMemberInfo[]> {
+    const seen = new Set<string>([this.myIk()])
+    const roster: GroupMemberInfo[] = []
+    for (const id of contactIds) {
+      const c = await this.db.get('contacts', id)
+      if (!c || !usable(c) || seen.has(c.ik)) continue
+      seen.add(c.ik)
+      // Участникам уходит имя, которым человек назвался сам, а не то, как я его переименовал у себя
+      roster.push({ ik: c.ik, name: c.selfName ?? c.name })
+    }
+    return roster
+  }
+
+  /**
+   * Правка группы администратором: изменить состав или название, поднять номер состояния
+   * и разослать новое состояние всем участникам (и тем, кого только что удалили, — чтобы узнали).
+   */
+  private async editGroup(
+    gid: string,
+    change: (conv: Conversation, group: GroupInfo) => { title?: string; roster?: GroupMemberInfo[]; notes: string[] },
+  ): Promise<void> {
+    let before: GroupInfo | undefined
+    let after: Conversation | undefined
+    await transact(this.db, ['conversations', 'messages'], async (tx) => {
+      const conv = await tx.objectStore('conversations').get(gid)
+      const g = conv?.group
+      if (!conv || !g || g.left) throw new Error('Группа не найдена')
+      if (g.admin !== 'me') throw new Error('Менять группу может только её администратор')
+      const { title, roster, notes } = change(conv, g)
+      before = g
+      let next: Conversation = { ...conv, title: title ?? conv.title, group: { ...g, rev: g.rev + 1, roster: roster ?? g.roster } }
+      await tx.objectStore('conversations').put(next)
+      for (const text of notes) next = await this.note(tx, next, text)
+      after = next
+    })
+    this.emit()
+    if (!after?.group || !before) return
+    const kept = new Set(after.group.roster.map((m) => m.ik))
+    const removed: Contact[] = []
+    for (const m of before.roster) {
+      const c = kept.has(m.ik) ? undefined : await this.contactByIk(m.ik)
+      if (c) removed.push(c)
+    }
+    await this.broadcastGroup(after, removed)
+    await this.dropOrphanContacts()
+  }
+
+  async addGroupMembers(gid: string, contactIds: string[]): Promise<void> {
+    const added = await this.rosterOf(contactIds)
+    await this.editGroup(gid, (_conv, g) => {
+      const fresh = added.filter((a) => !g.roster.some((m) => m.ik === a.ik))
+      if (g.roster.length + fresh.length >= MAX_GROUP) throw new Error(`В группе может быть не больше ${MAX_GROUP} человек`)
+      return { roster: [...g.roster, ...fresh], notes: fresh.map((m) => `${m.name} теперь в группе`) }
+    })
+  }
+
+  async removeGroupMember(gid: string, ik: string): Promise<void> {
+    await this.editGroup(gid, (_conv, g) => {
+      const gone = g.roster.find((m) => m.ik === ik)
+      return { roster: g.roster.filter((m) => m.ik !== ik), notes: gone ? [`${gone.name} больше не в группе`] : [] }
+    })
+  }
+
+  async renameGroup(gid: string, name: string): Promise<void> {
+    name = name.trim().slice(0, NAME_MAX)
+    if (!name) return
+    await this.editGroup(gid, (conv) => ({
+      title: name,
+      notes: conv.title === name ? [] : [`Группа теперь называется «${name}»`],
+    }))
+  }
+
+  /** Разослать состояние группы всем, с кем есть канал (extra — ещё и только что удалённым). */
+  private async broadcastGroup(conv: Conversation, extra: Contact[] = []): Promise<void> {
+    const g = conv.group!
+    const members: GroupMemberInfo[] = [{ ik: this.myIk(), name: this.profile!.name }, ...g.roster]
+    const body = { name: conv.title, admin: this.myIk(), rev: g.rev, members }
+    for (const c of [...(await this.groupTargets(g)), ...extra]) {
+      await this.sendContent(c, { id: randomId(), ts: Date.now(), type: 'group-state', conv: conv.id, body }).catch((e) =>
+        console.warn('Состояние группы не отправлено', e),
+      )
+    }
+  }
+
+  /** Сообщить участникам, что я выхожу. Администратор при этом передаёт управление первому из них. */
+  private async announceLeave(conv: Conversation): Promise<void> {
+    const g = conv.group!
+    const targets = await this.groupTargets(g)
+    const body = g.admin === 'me' && targets.length ? { admin: targets[0].ik } : {}
+    await Promise.allSettled(
+      targets.map((c) => this.sendContent(c, { id: randomId(), ts: Date.now(), type: 'group-leave', conv: conv.id, body })),
+    )
+  }
+
+  /** Выйти из группы и удалить её переписку у себя. */
+  async leaveGroup(gid: string): Promise<void> {
+    const conv = await this.db.get('conversations', gid)
+    if (!conv?.group) return
+    if (!conv.group.left) await this.announceLeave(conv)
+    const msgs = await listMessages(this.db, gid)
+    await writeAll(this.db, ['conversations', 'messages', 'files'], (tx) => [
+      tx.objectStore('conversations').delete(gid),
+      ...msgs.map((m) => tx.objectStore('messages').delete(m.id)),
+      ...msgs.filter((m) => m.type === 'file').map((m) => tx.objectStore('files').delete(m.id)),
+    ])
+    await this.dropOrphanContacts()
+    this.emit()
+  }
+
+  /**
+   * Убрать то, что держалось только на группах: контакты людей, с которыми общих групп больше
+   * нет (а личного чата и не было), и свои неиспользованные «знакомства» для них.
+   */
+  private async dropOrphanContacts(): Promise<void> {
+    const needed = await this.groupIks()
+    for (const c of await this.db.getAll('contacts')) {
+      if (!c.groupOnly || needed.has(c.ik)) continue
+      await this.sendGoodbye(c).catch(() => {})
+      await writeAll(this.db, ['contacts', 'sessions'], (tx) => [
+        tx.objectStore('contacts').delete(c.id),
+        tx.objectStore('sessions').delete(c.id),
+      ])
+      await this.closeMailbox(c.myMailbox)
+    }
+    for (const inv of await this.db.getAll('invites')) {
+      if (inv.group && !needed.has(inv.group.ik)) await this.cancelInvite(inv.mailbox)
+    }
+  }
+
+  /** Состояние группы от администратора: создание, новый состав, новое название, моё удаление. */
+  private async applyGroupState(tx: ReceiveTx, contact: Contact, c: GroupStateContent): Promise<(() => void) | undefined> {
+    const gid = c.conv
+    const b = c.body
+    if (typeof gid !== 'string' || !ID_RE.test(gid) || !b || typeof b.name !== 'string') return
+    // Состояние вправе слать только администратор, и он сам должен быть в списке
+    if (b.admin !== contact.ik || !Number.isSafeInteger(b.rev) || !Array.isArray(b.members)) return
+    const me = this.myIk()
+    const seen = new Set<string>()
+    const members: GroupMemberInfo[] = []
+    for (const m of b.members.slice(0, MAX_GROUP)) {
+      if (!m || typeof m.ik !== 'string' || !IK_RE.test(m.ik) || seen.has(m.ik)) continue
+      seen.add(m.ik)
+      members.push({ ik: m.ik, name: String(m.name ?? '').trim().slice(0, NAME_MAX) || 'Участник' })
+    }
+    if (!seen.has(contact.ik)) return
+    const amIn = seen.has(me)
+    const roster = members.filter((m) => m.ik !== me)
+    const title = b.name.trim().slice(0, NAME_MAX) || 'Группа'
+    const conversations = tx.objectStore('conversations')
+    const old = await conversations.get(gid)
+
+    if (!old) {
+      if (!amIn) return
+      const conv: Conversation = {
+        id: gid, kind: 'group', members: [], title, lastTs: Date.now(), lastText: '', unread: 0,
+        group: { admin: contact.ik, rev: b.rev, roster },
+      }
+      await this.note(tx, conv, `${contact.name} добавил(а) вас в группу`, true)
+    } else {
+      const g = old.group
+      if (!g || g.admin !== contact.ik || b.rev <= g.rev) return
+      if (!amIn) {
+        if (g.left) return
+        await this.note(tx, { ...old, group: { ...g, rev: b.rev, left: 'removed' } }, 'Вас удалили из группы', true)
+      } else {
+        let conv: Conversation = { ...old, title, group: { admin: g.admin, rev: b.rev, roster } }
+        await conversations.put(conv)
+        if (g.left) conv = await this.note(tx, conv, 'Вас снова добавили в группу', true)
+        if (title !== old.title) conv = await this.note(tx, conv, `Группа теперь называется «${title}»`)
+        for (const m of roster) {
+          if (!g.roster.some((x) => x.ik === m.ik)) conv = await this.note(tx, conv, `${m.name} теперь в группе`)
+        }
+        for (const m of g.roster) {
+          if (!seen.has(m.ik)) conv = await this.note(tx, conv, `${m.name} больше не в группе`)
+        }
+      }
+    }
+    return () => {
+      void this.linkGroup(gid).catch((e) => console.warn('Не удалось познакомиться с участниками', e))
+      void this.dropOrphanContacts().catch(() => {})
+    }
+  }
+
+  /** Участник вышел из группы (администратор — передав управление). */
+  private async applyGroupLeave(tx: ReceiveTx, contact: Contact, c: GroupLeaveContent): Promise<(() => void) | undefined> {
+    const gid = c.conv
+    if (typeof gid !== 'string' || !ID_RE.test(gid)) return
+    const conv = await tx.objectStore('conversations').get(gid)
+    const g = conv?.group
+    if (!conv || !g || g.left || !inGroup(g, contact.ik)) return
+    const roster = g.roster.filter((m) => m.ik !== contact.ik)
+    let admin = g.admin
+    if (g.admin === contact.ik) {
+      // Преемника называет сам уходящий администратор; не назвал годного — группа остаётся без управления
+      const heir = c.body?.admin
+      admin = heir === this.myIk() ? 'me' : roster.some((m) => m.ik === heir) ? (heir as string) : ''
+    }
+    const mine = g.admin === 'me'
+    // Мой номер состояния растёт, только если состоянием управляю я
+    let next: Conversation = { ...conv, group: { ...g, admin, roster, rev: mine || admin === 'me' ? g.rev + 1 : g.rev } }
+    await tx.objectStore('conversations').put(next)
+    next = await this.note(tx, next, `${contact.name} вышел(ла) из группы`)
+    if (admin === 'me' && !mine) next = await this.note(tx, next, 'Теперь группой управляете вы', true)
+    return () => {
+      // Вышедший мог знать не всех — администратор сообщает новый состав остальным
+      if (mine) void this.broadcastGroup(next).catch(() => {})
+      void this.dropOrphanContacts().catch(() => {})
+    }
+  }
+
+  /**
+   * Познакомиться с участниками группы, с которыми ещё нет канала. Из двоих приглашение создаёт
+   * тот, чей ключ меньше (так оба решают одинаково), и передаёт его через администратора:
+   * с ним канал есть у каждого. Второй отвечает на приглашение, как на обычную ссылку.
+   */
+  private async linkGroup(gid: string): Promise<void> {
+    const conv = await this.db.get('conversations', gid)
+    const g = conv?.group
+    if (!g || g.left || g.admin === 'me' || !g.admin) return
+    const admin = await this.contactByIk(g.admin)
+    if (!admin) return
+    const me = this.myIk()
+    const waiting = new Set((await this.db.getAll('invites')).map((i) => i.group?.ik))
+    for (const m of g.roster) {
+      if (m.ik === g.admin || me > m.ik || waiting.has(m.ik) || (await this.contactByIk(m.ik))) continue
+      const inv: PendingInvite = { ...(await createInviteCrypto(this.identity!, this.profile!.name)), group: { gid, ik: m.ik } }
+      await this.db.put('invites', inv)
+      this.send({ t: 'register', mailbox: inv.mailbox, invite: true })
+      await this.sendContent(admin, {
+        id: randomId(), ts: Date.now(), type: 'group-intro', conv: gid,
+        body: { for: m.ik, invite: encodeInvite(inv.payload) },
+      })
+    }
+  }
+
+  /** «Знакомство»: администратор пересылает его адресату, адресат — принимает. */
+  private async onGroupIntro(contact: Contact, c: GroupIntroContent): Promise<void> {
+    const gid = c.conv
+    const b = c.body
+    const conv = typeof gid === 'string' && ID_RE.test(gid) ? await this.db.get('conversations', gid) : undefined
+    const g = conv?.group
+    if (!g || g.left || !b || typeof b.invite !== 'string' || b.invite.length > 600) return
+    let invite: InvitePayload
+    try {
+      invite = decodeInvite(b.invite)
+    } catch {
+      return
+    }
+    const member = (ik: unknown) => typeof ik === 'string' && g.roster.some((m) => m.ik === ik)
+    if (g.admin === 'me') {
+      // Пересылаю: только между участниками и только приглашение самого отправителя
+      if (!member(contact.ik) || !member(b.for) || invite.ik !== contact.ik) return
+      const target = await this.contactByIk(b.for!)
+      if (!target) return
+      await this.sendContent(target, {
+        id: randomId(), ts: Date.now(), type: 'group-intro', conv: gid,
+        body: { from: contact.ik, invite: b.invite },
+      })
+      return
+    }
+    // Принимаю: только от администратора и только если ключ в приглашении — того, кого он назвал
+    if (contact.ik !== g.admin || !member(b.from) || invite.ik !== b.from) return
+    if (await this.contactByIk(invite.ik)) return
+    const { session, preKey } = await acceptInviteCrypto(this.identity!, invite)
+    const said = invite.n?.trim().slice(0, NAME_MAX)
+    const created: Contact = {
+      id: randomId(),
+      name: said || 'Участник',
+      ...(said ? { selfName: said } : {}),
+      groupOnly: true,
+      myMailbox: randomId(),
+      theirMailbox: invite.m,
+      ik: invite.ik,
+      sigPub: invite.sk,
+      createdAt: Date.now(),
+    }
+    await writeAll(this.db, ['contacts', 'sessions'], (tx) => [
+      tx.objectStore('contacts').put(created),
+      tx.objectStore('sessions').put({ contactId: created.id, state: session, preKey }),
+    ])
+    this.send({ t: 'register', mailbox: created.myMailbox, invite: false })
+    await this.sendContent(created, {
+      id: randomId(), ts: Date.now(), type: 'hello',
+      body: { name: this.profile!.name, mailbox: created.myMailbox, sigPub: b64e(this.identity!.sig.pub) },
+    })
+    this.emit()
+  }
+
+  /** Группа глазами интерфейса: участники с именами и тем, есть ли с ними канал. */
+  async group(gid: string): Promise<GroupView | null> {
+    const conv = await this.db.get('conversations', gid)
+    const g = conv?.group
+    if (!conv || !g) return null
+    const members: GroupView['members'] = []
+    for (const m of g.roster) {
+      const c = await this.contactByIk(m.ik)
+      members.push({ ik: m.ik, name: c?.name ?? m.name, contactId: c?.id ?? null, admin: g.admin === m.ik })
+    }
+    return { id: gid, title: conv.title, amAdmin: g.admin === 'me', left: g.left ?? null, members }
+  }
+
   async safetyNumber(contactId: string): Promise<string | null> {
     const c = await this.db.get('contacts', contactId)
     return c ? safetyNumber(this.identity!.dh.pub, b64d(c.ik)) : null
   }
 }
+
+/** Группа для интерфейса. contactId: null — канала с участником ещё нет, он сообщений не получит. */
+export interface GroupView {
+  id: string
+  title: string
+  amAdmin: boolean
+  left: 'left' | 'removed' | null
+  members: { ik: string; name: string; contactId: string | null; admin: boolean }[]
+}
+
+type GroupTx = WriteTx<('conversations' | 'messages')[]>
+
+/** Контакту можно писать: его ящик известен и он не удалил чат. */
+const usable = (c: Contact) => !!c.theirMailbox && !c.gone
+
+/** Этот ключ — участник группы (администратор тоже в списке, кроме случая, когда администратор я). */
+const inGroup = (g: GroupInfo, ik: string) => g.admin === ik || g.roster.some((m) => m.ik === ik)
 
 type Waiter<T> = { resolve: (v: T) => void; reject: (e: Error) => void }
 

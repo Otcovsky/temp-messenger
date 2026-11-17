@@ -18,16 +18,16 @@ const { relay, FakeTransport, blobs } = vi.hoisted(() => {
     boxes = new Map<string, Box>()
     /** Все payload, которые видел сервер */
     seen: string[] = []
-    /** Флаг notify каждого принятого send, по порядку */
-    notify: unknown[] = []
-    /** Срок хранения (ttl) каждого принятого send; undefined — обычный */
-    ttl: (number | undefined)[] = []
+    /**
+     * Каждый принятый send, по порядку: кто отправил, флаг notify и срок хранения (ttl; undefined —
+     * обычный). Отправитель нужен, потому что клиенты прошлых тестов ещё живы и тоже что-то шлют.
+     */
+    sends: { from: unknown; notify: unknown; ttl: number | undefined }[] = []
 
     reset() {
       this.boxes.clear()
       this.seen = []
-      this.notify = []
-      this.ttl = []
+      this.sends = []
     }
 
     handle(from: FakeTransport, f: Frame) {
@@ -51,8 +51,7 @@ const { relay, FakeTransport, blobs } = vi.hoisted(() => {
           break
         case 'send': {
           const failed: Frame[] = []
-          this.notify.push(f.notify ?? false)
-          this.ttl.push(f.ttl)
+          this.sends.push({ from, notify: f.notify ?? false, ttl: f.ttl })
           for (const to of f.to as string[]) {
             const b = this.boxes.get(to)
             if (!b) {
@@ -173,6 +172,9 @@ async function until<T>(fn: () => Promise<T | undefined | null | false> | T | un
 }
 
 const settle = () => new Promise((r) => setTimeout(r, 60))
+
+/** Что этот клиент отправил на сервер (с какого места журнала считать — from). */
+const sentBy = (m: Client, from = 0) => relay.sends.slice(from).filter((s) => s.from === m.transport)
 
 /** Алиса приглашает, Боб принимает. Возвращает клиентов и id беседы у каждого. */
 async function connected() {
@@ -469,8 +471,9 @@ describe('файлы', () => {
     await bob.markRead(bobConv)
     await until(async () => (await alice.messages(aliceConv)).some((x: any) => x.status === 'read'))
     // hello Боба и текст Алисы — с уведомлением; квитанции «доставлено» и «прочитано» — без
-    expect(relay.notify.filter(Boolean)).toHaveLength(2)
-    expect(relay.notify.filter((n) => !n).length).toBeGreaterThanOrEqual(2)
+    const all = [...sentBy(alice), ...sentBy(bob)].map((s) => s.notify)
+    expect(all.filter(Boolean)).toHaveLength(2)
+    expect(all.filter((n) => !n).length).toBeGreaterThanOrEqual(2)
   })
 
   it('сигналы звонка доходят до собеседника и живут на сервере недолго', async () => {
@@ -478,8 +481,7 @@ describe('файлы', () => {
     const got: any[] = []
     bob.onCall = (contact: any, c: any) => got.push({ from: contact.id, type: c.type, body: c.body })
     const call = 'A'.repeat(22)
-    relay.notify = []
-    relay.ttl = []
+    const mark = relay.sends.length
     await alice.sendCall(aliceConv, { type: 'call-offer', body: { call, sdp: 'v=0' } })
     await alice.sendCall(aliceConv, { type: 'call-end', body: { call, reason: 'timeout' } }, true)
     await alice.sendCall(aliceConv, { type: 'call-end', body: { call: 'не id', reason: 'hangup' } })
@@ -491,13 +493,236 @@ describe('файлы', () => {
     ])
     // Приглашение звонит у получателя и хранится минуту; «не ответили» хранится как обычное сообщение
     // и тоже будит — покажет пропущенный; конец состоявшегося разговора не будит
-    expect(relay.notify).toEqual(['call', 'call-end', false])
-    expect(relay.ttl).toEqual([60, undefined, 60])
+    expect(sentBy(alice, mark).map((s) => s.notify)).toEqual(['call', 'call-end', false])
+    expect(sentBy(alice, mark).map((s) => s.ttl)).toEqual([60, undefined, 60])
     expect(await texts(bob, bobConv)).toEqual([]) // в ленту сигналы не попадают
 
     await bob.addCallRecord(bobConv, call, false, 1000, { outcome: 'missed' })
     await bob.addCallRecord(bobConv, call, false, 1000, { outcome: 'answered', duration: 5 }) // повтор не меняет запись
     expect(await texts(bob, bobConv)).toEqual(['Пропущенный звонок'])
     expect((await bob.conversations())[0].unread).toBe(1)
+  })
+})
+
+describe('группы', () => {
+  const bytes = (n: number) => Uint8Array.from({ length: n }, (_, i) => (i * 31 + 7) & 0xff)
+
+  /** Алиса знает Боба и Кэрол; между собой те не знакомы. Возвращает клиентов и id личных чатов Алисы. */
+  async function trio() {
+    const alice = await client('Алиса')
+    const bob = await client('Боб')
+    const carol = await client('Кэрол')
+    const withBob = await befriend(alice, bob)
+    const withCarol = await befriend(alice, carol)
+    return { alice, bob, carol, withBob, withCarol }
+  }
+
+  /** a приглашает, b принимает. Возвращает id личного чата у a. */
+  async function befriend(a: Client, b: Client): Promise<string> {
+    const before = new Set((await a.conversations()).map((c: any) => c.id))
+    const invite = await a.createInvite()
+    await b.acceptInvite(invite.payload)
+    return (await until(async () => (await a.conversations()).find((c: any) => !before.has(c.id)))).id
+  }
+
+  /** Все участники группы у этого клиента на связи (канал установлен). */
+  const linked = async (m: Client, gid: string, n: number) => {
+    const g = await m.group(gid)
+    return !!g && g.members.length === n && g.members.every((x: any) => x.contactId)
+  }
+
+  /** Группа создана, и каждый знаком с каждым. */
+  async function grouped() {
+    const t = await trio()
+    const gid = await t.alice.createGroup('Друзья', [t.withBob, t.withCarol])
+    await until(() => linked(t.bob, gid, 2))
+    await until(() => linked(t.carol, gid, 2))
+    return { ...t, gid }
+  }
+
+  const chat = async (m: Client, gid: string) =>
+    (await m.messages(gid)).filter((x: any) => x.type !== 'note').map((x: any) => `${x.fromName ?? 'я'}: ${x.text}`)
+  const notes = async (m: Client, gid: string) =>
+    (await m.messages(gid)).filter((x: any) => x.type === 'note').map((x: any) => x.text)
+
+  it('создатель сводит незнакомых участников, сообщения доходят каждому', async () => {
+    const { alice, bob, carol, gid } = await grouped()
+    expect((await bob.group(gid))!.title).toBe('Друзья')
+    expect((await bob.group(gid))!.members.map((m: any) => m.name).sort()).toEqual(['Алиса', 'Кэрол'])
+    expect((await bob.group(gid))!.amAdmin).toBe(false)
+    expect((await alice.group(gid))!.amAdmin).toBe(true)
+
+    await bob.sendText(gid, 'всем привет')
+    await until(async () => (await chat(alice, gid)).length === 1)
+    await until(async () => (await chat(carol, gid)).length === 1)
+    await carol.sendText(gid, 'привет, Боб')
+    await until(async () => (await chat(bob, gid)).length === 2)
+    await until(async () => (await chat(alice, gid)).length === 2)
+
+    expect(await chat(alice, gid)).toEqual(['Боб: всем привет', 'Кэрол: привет, Боб'])
+    expect(await chat(bob, gid)).toEqual(['я: всем привет', 'Кэрол: привет, Боб'])
+    expect(await chat(carol, gid)).toEqual(['Боб: всем привет', 'я: привет, Боб'])
+    // У сообщения в группе один id на всех — на него потом можно будет ссылаться
+    const id = (m: Client) => m.messages(gid).then((l: any[]) => l.find((x) => x.text === 'всем привет')!.id)
+    expect(await id(alice)).toBe(await id(bob))
+    expect(await id(carol)).toBe(await id(bob))
+    await until(async () => (await bob.messages(gid)).find((x: any) => x.text === 'всем привет')!.status === 'sent')
+
+    // Знакомство по группе не заводит личный чат: у Боба — только Алиса и группа
+    expect((await bob.conversations()).map((c: any) => c.title).sort()).toEqual(['Алиса', 'Друзья'])
+    expect(await bob.listInvites()).toEqual([])
+    // Сервер открытого текста не видел
+    expect(relay.seen.some((p) => p.includes('привет') || p.includes('Друзья'))).toBe(false)
+    expect(await notes(bob, gid)).toEqual(['Алиса добавил(а) вас в группу'])
+  })
+
+  it('личное сообщение знакомому по группе открывает обычный чат', async () => {
+    const { bob, carol, gid } = await grouped()
+    const carolAtBob = (await bob.group(gid))!.members.find((m: any) => m.name === 'Кэрол')!.contactId
+    // Написать лично можно только из личного чата; его создаёт первое входящее без метки группы
+    await (bob as any).sendContent(await bob.contact(carolAtBob!), {
+      id: 'B'.repeat(22), ts: Date.now(), type: 'text', body: { text: 'лично' },
+    })
+    await until(async () => (await carol.conversations()).some((c: any) => c.title === 'Боб'))
+    const direct = (await carol.conversations()).find((c: any) => c.title === 'Боб')
+    expect(await texts(carol, direct!.id)).toEqual(['лично'])
+    expect(await chat(carol, gid)).toEqual([])
+  })
+
+  it('удалённый участник перестаёт получать сообщения и писать', async () => {
+    const { alice, bob, carol, gid } = await grouped()
+    const carolIk = (await alice.group(gid))!.members.find((m: any) => m.name === 'Кэрол')!.ik
+    await alice.removeGroupMember(gid, carolIk)
+    await until(async () => (await carol.group(gid))!.left === 'removed')
+    await until(async () => (await bob.group(gid))!.members.length === 1)
+
+    await bob.sendText(gid, 'без Кэрол')
+    await until(async () => (await chat(alice, gid)).length === 1)
+    await settle()
+    expect(await chat(carol, gid)).toEqual([])
+    await expect(carol.sendText(gid, 'я тут')).rejects.toThrow('больше не участник')
+    expect((await notes(carol, gid)).at(-1)).toBe('Вас удалили из группы')
+    expect((await notes(bob, gid)).at(-1)).toBe('Кэрол больше не в группе')
+
+    // Знакомство держалось только на группе — канал между Бобом и Кэрол закрыт
+    await until(async () => (await (bob as any).db.getAll('contacts')).length === 1)
+    await until(async () => (await (carol as any).db.getAll('contacts')).length === 1)
+
+    // Чужое сообщение с меткой группы не принимается, даже если канал с отправителем есть
+    const aliceAtCarol = (await (carol as any).db.getAll('contacts'))[0]
+    await (carol as any).sendContent(aliceAtCarol, {
+      id: 'C'.repeat(22), ts: Date.now(), type: 'text', conv: gid, body: { text: 'подброшено' },
+    })
+    await settle()
+    expect(await chat(alice, gid)).toEqual(['Боб: без Кэрол'])
+  })
+
+  it('участника можно добавить позже: он знакомится со всеми и видит только новое', async () => {
+    const { alice, bob, carol, gid } = await grouped()
+    await bob.sendText(gid, 'до Дэйва')
+    await until(async () => (await chat(carol, gid)).length === 1)
+
+    const dave = await client('Дэйв')
+    const withDave = await befriend(alice, dave)
+    await alice.addGroupMembers(gid, [withDave])
+    await until(() => linked(dave, gid, 3))
+    await until(() => linked(bob, gid, 3))
+    await until(() => linked(carol, gid, 3))
+
+    await carol.sendText(gid, 'привет, Дэйв')
+    await until(async () => (await chat(dave, gid)).length === 1)
+    expect(await chat(dave, gid)).toEqual(['Кэрол: привет, Дэйв'])
+    await dave.sendText(gid, 'всем привет')
+    await until(async () => (await chat(bob, gid)).length === 3)
+    expect((await chat(bob, gid)).at(-1)).toBe('Дэйв: всем привет')
+    expect(await notes(bob, gid)).toContain('Дэйв теперь в группе')
+  })
+
+  it('выход из группы; администратор, уходя, передаёт управление', async () => {
+    const { alice, bob, carol, gid } = await grouped()
+    await bob.leaveGroup(gid)
+    expect(await bob.group(gid)).toBeNull()
+    await until(async () => (await alice.group(gid))!.members.length === 1)
+    await until(async () => (await carol.group(gid))!.members.length === 1)
+    expect((await notes(carol, gid)).at(-1)).toBe('Боб вышел(ла) из группы')
+
+    await alice.leaveGroup(gid)
+    await until(async () => (await carol.group(gid))!.amAdmin)
+    expect((await carol.group(gid))!.members).toEqual([])
+    expect((await notes(carol, gid)).at(-1)).toBe('Теперь группой управляете вы')
+    // Новый администратор может переименовать группу
+    await carol.renameGroup(gid, 'Одна')
+    expect((await carol.group(gid))!.title).toBe('Одна')
+  })
+
+  it('переименование доходит до участников, не-администратор менять группу не может', async () => {
+    const { alice, bob, carol, gid } = await grouped()
+    await alice.renameGroup(gid, 'Работа')
+    await until(async () => (await bob.group(gid))!.title === 'Работа')
+    await until(async () => (await carol.group(gid))!.title === 'Работа')
+    expect((await bob.conversations()).some((c: any) => c.title === 'Работа')).toBe(true)
+    await expect(bob.renameGroup(gid, 'Захват')).rejects.toThrow('только её администратор')
+    const aliceIk = (await bob.group(gid))!.members.find((m: any) => m.admin)!.ik
+    await expect(bob.removeGroupMember(gid, aliceIk)).rejects.toThrow('только её администратор')
+  })
+
+  it('чужое состояние группы не принимается', async () => {
+    const { alice, bob, carol, gid } = await grouped()
+    // Кэрол (не администратор) пытается разослать своё состояние: себя — администратором, без Алисы
+    const bobAtCarol = (await carol.group(gid))!.members.find((m: any) => m.name === 'Боб')!
+    const me = (carol as any).myIk()
+    await (carol as any).sendContent(await carol.contact(bobAtCarol.contactId!), {
+      id: 'D'.repeat(22), ts: Date.now(), type: 'group-state', conv: gid,
+      body: { name: 'Захват', admin: me, rev: 99, members: [{ ik: me, name: 'Кэрол' }, { ik: bobAtCarol.ik, name: 'Боб' }] },
+    })
+    await settle()
+    const g = (await bob.group(gid))!
+    expect(g.title).toBe('Друзья')
+    expect(g.members.map((m: any) => m.name).sort()).toEqual(['Алиса', 'Кэрол'])
+    expect((await alice.group(gid))!.amAdmin).toBe(true)
+  })
+
+  it('файл в группе загружается один раз и доходит каждому', async () => {
+    const { alice, bob, carol, gid } = await grouped()
+    const data = bytes(3000)
+    await alice.sendFile(gid, new File([data], 'план.pdf', { type: 'application/pdf' }), 'смотрите')
+    const got = async (m: Client) => {
+      const msg = (await m.messages(gid)).find((x: any) => x.type === 'file')
+      return msg?.file?.state === 'ready' ? msg : null
+    }
+    const atBob = await until(() => got(bob))
+    const atCarol = await until(() => got(carol))
+    expect(new Uint8Array((await bob.fileData(atBob.id))!)).toEqual(data)
+    expect(new Uint8Array((await carol.fileData(atCarol.id))!)).toEqual(data)
+    expect(atBob.text).toBe('смотрите')
+    expect(atBob.fromName).toBe('Алиса')
+    // Оба скачали — на сервере файла больше нет
+    await until(() => blobs.files.size === 0)
+  })
+
+  it('удаление личного чата с участником общей группы группу не ломает', async () => {
+    const { alice, bob, gid, withBob } = await grouped()
+    await alice.deleteConversation(withBob)
+    expect((await alice.conversations()).map((c: any) => c.title).sort()).toEqual(['Друзья', 'Кэрол'])
+    await alice.sendText(gid, 'я всё ещё тут')
+    await until(async () => (await chat(bob, gid)).length === 1)
+    await bob.sendText(gid, 'вижу')
+    await until(async () => (await chat(alice, gid)).length === 2)
+    // Боб не получил «чат закрыт»: его личный чат с Алисой жив
+    expect((await (bob as any).db.getAll('contacts')).every((c: any) => !c.gone)).toBe(true)
+  })
+
+  it('сигнал звонка с меткой группы пока не обрабатывается', async () => {
+    const { alice, bob, gid, withBob } = await grouped()
+    const got: any[] = []
+    bob.onCall = (_contact: any, c: any) => got.push(c.type)
+    const to = await alice.contact(withBob)
+    await (alice as any).sendContent(to, {
+      id: 'E'.repeat(22), ts: Date.now(), type: 'call-offer', conv: gid, body: { call: 'F'.repeat(22), sdp: 'v=0' },
+    })
+    await alice.sendCall(withBob, { type: 'call-offer', body: { call: 'G'.repeat(22), sdp: 'v=0' } })
+    await until(() => got.length === 1)
+    await settle()
+    expect(got).toEqual(['call-offer']) // дошёл только личный звонок
   })
 })

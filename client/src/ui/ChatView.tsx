@@ -25,6 +25,7 @@ import { AttachmentTray, MAX_ATTACHMENTS } from './AttachmentTray'
 import { Avatar } from './Avatar'
 import { FileCard, FileMessage, MediaTile, isInlineImage, isInlineMime } from './FileMessage'
 import { formatDay } from './format'
+import { GroupInfoDialog, membersCount } from './GroupUi'
 import { useLive, useMessenger } from './hooks'
 import { Modal } from './Modal'
 
@@ -32,7 +33,8 @@ const sameDay = (a: number, b: number) => new Date(a).toDateString() === new Dat
 
 export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack: () => void; onDeleted: () => void }) {
   const m = useMessenger()
-  const contact = useLive((m) => m.contact(convId), [convId])
+  // Беседа — либо личный чат (contact), либо группа (group); undefined — ещё загружается
+  const chat = useLive(async (m) => ({ contact: await m.contact(convId), group: await m.group(convId) }), [convId])
   const messages = useLive((m) => m.messages(convId), [convId])
   const [text, setText] = useState('')
   const [info, setInfo] = useState(false)
@@ -73,7 +75,7 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
 
   // Высота ленты или её содержимого изменилась — если лента прижата к низу, возвращаем её туда.
   // ResizeObserver срабатывает после раскладки, но до отрисовки, так что сдвиг не успевает мелькнуть.
-  const ready = !!contact && !!messages
+  const ready = !!chat && !!messages
   useLayoutEffect(() => {
     const el = listRef.current
     const content = contentRef.current
@@ -125,8 +127,9 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
   }
 
   const shell = 'flex min-h-0 min-w-0 flex-1 flex-col bg-chat max-md:animate-slide-in'
-  if (contact === undefined && messages === undefined) return <section className={shell} />
-  if (!contact)
+  if (!chat) return <section className={shell} />
+  const { contact, group } = chat
+  if (!contact && !group)
     return (
       <section className={`${shell} items-center justify-center`}>
         <p className="muted">Чат удалён.</p>
@@ -134,7 +137,9 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
     )
 
   const items = groupAlbums(messages ?? [])
-  const canWrite = !contact.gone && !!contact.theirMailbox
+  const title = group ? group.title : contact!.name
+  const gone = !group && !!contact!.gone
+  const canWrite = group ? !group.left : !gone && !!contact!.theirMailbox
   const hasFiles = (e: React.DragEvent) => canWrite && e.dataTransfer.types.includes('Files')
   const canSend = canWrite && (!!text.trim() || staged.length > 0)
 
@@ -161,10 +166,14 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
           <ChevronLeft className="size-7" />
         </button>
         <button className="flex min-w-0 flex-1 items-center gap-3 rounded-2xl py-2 pr-2 text-left" onClick={() => setInfo(true)}>
-          <Avatar name={contact.name} size="sm" />
+          <Avatar name={title} size="sm" />
           <span className="flex min-w-0 flex-col">
-            <b className="truncate text-base font-semibold">{contact.name}</b>
-            {contact.gone ? (
+            <b className="truncate text-base font-semibold">{title}</b>
+            {group ? (
+              <small className="muted truncate text-xs">
+                {group.left ? 'вы больше не участник' : membersCount(group.members.length + 1)}
+              </small>
+            ) : gone ? (
               <small className="truncate text-xs text-rose-500">удалил(а) чат</small>
             ) : (
               <small className="flex items-center gap-1 truncate text-xs text-emerald-600 dark:text-emerald-400">
@@ -173,7 +182,8 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
             )}
           </span>
         </button>
-        {!contact.gone && contact.theirMailbox && (
+        {/* В группах звонков пока нет */}
+        {!group && canWrite && (
           <>
             <button className="btn-icon" onClick={() => void startCall(convId)} aria-label="Позвонить" title="Позвонить">
               <Phone className="size-5.5" />
@@ -188,7 +198,12 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
             </button>
           </>
         )}
-        <button className="btn-icon" onClick={() => setInfo(true)} aria-label="О чате" title="О чате">
+        <button
+          className="btn-icon"
+          onClick={() => setInfo(true)}
+          aria-label={group ? 'О группе' : 'О чате'}
+          title={group ? 'О группе' : 'О чате'}
+        >
           <Info className="size-5.5" />
         </button>
       </header>
@@ -215,9 +230,11 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
               <div className="grid size-14 place-items-center rounded-2xl bg-brand text-white shadow-lg shadow-violet-500/30">
                 <ShieldCheck className="size-7" />
               </div>
-              <p className="font-semibold">Чат создан</p>
+              <p className="font-semibold">{group ? 'Группа создана' : 'Чат создан'}</p>
               <p className="muted text-sm leading-relaxed">
-                Сообщения шифруются в браузере и расшифровываются только у собеседника.
+                {group
+                  ? 'Сообщения шифруются в браузере отдельно для каждого участника.'
+                  : 'Сообщения шифруются в браузере и расшифровываются только у собеседника.'}
               </p>
             </div>
           )}
@@ -238,7 +255,13 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
         </div>
       </div>
 
-      {contact.gone && (
+      {group?.left && (
+        <div className="flex shrink-0 items-center gap-2 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-800 dark:text-amber-200">
+          <UserX className="size-4 shrink-0" />{' '}
+          {group.left === 'removed' ? 'Администратор удалил вас из группы.' : 'Вы вышли из группы.'} Писать сюда больше нельзя.
+        </div>
+      )}
+      {gone && (
         <div className="flex shrink-0 items-center gap-2 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-800 dark:text-amber-200">
           <UserX className="size-4 shrink-0" /> Собеседник удалил этот чат. Новые сообщения не будут доставлены.
         </div>
@@ -330,7 +353,12 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
         </div>
       )}
 
-      {info && <ChatInfo convId={convId} onClose={() => setInfo(false)} onDeleted={onDeleted} />}
+      {info &&
+        (group ? (
+          <GroupInfoDialog group={group} onClose={() => setInfo(false)} onDeleted={onDeleted} />
+        ) : (
+          <ChatInfo convId={convId} onClose={() => setInfo(false)} onDeleted={onDeleted} />
+        ))}
     </section>
   )
 }
@@ -395,13 +423,29 @@ function MessageRow({
     ? 'bg-brand text-white shadow-md shadow-violet-500/20'
     : 'bg-white text-slate-900 shadow-sm shadow-slate-900/5 dark:bg-surface-2-dark dark:text-slate-100 dark:shadow-black/20'
   const pop = animate ? 'animate-pop-in' : ''
+  const day = newDay && (
+    <div className="sticky top-1 z-10 my-3 self-center rounded-full bg-white/80 px-3 py-1 text-xs font-medium text-slate-500 shadow-sm backdrop-blur dark:bg-surface-2-dark/80 dark:text-slate-400">
+      {formatDay(msg.ts)}
+    </div>
+  )
+
+  // Служебная строка группы: «Анна вышла из группы»
+  if (msg.type === 'note')
+    return (
+      <>
+        {day}
+        <div className="my-1.5 max-w-[85%] self-center rounded-2xl bg-slate-900/[0.05] px-3 py-1 text-center text-xs text-slate-500 dark:bg-white/[0.06] dark:text-slate-400">
+          {msg.text}
+        </div>
+      </>
+    )
 
   return (
     <>
-      {newDay && (
-        <div className="sticky top-1 z-10 my-3 self-center rounded-full bg-white/80 px-3 py-1 text-xs font-medium text-slate-500 shadow-sm backdrop-blur dark:bg-surface-2-dark/80 dark:text-slate-400">
-          {formatDay(msg.ts)}
-        </div>
+      {day}
+      {/* В группе над первой репликой серии — кто пишет */}
+      {!mine && msg.fromName && groupStart && (
+        <div className="mt-2 -mb-1.5 ml-3 text-xs font-semibold text-violet-600 dark:text-violet-300">{msg.fromName}</div>
       )}
       <div className={`flex ${mine ? 'justify-end' : 'justify-start'} ${groupStart ? 'mt-2' : 'mt-0.5'}`}>
         {parts.length > 1 ? (
