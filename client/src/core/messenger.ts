@@ -703,11 +703,15 @@ export class Messenger {
     for (const m of await this.db.getAllFromIndex('messages', 'byTransfer', 'down')) await this.download(m.id)
   }
 
-  /** Сбой связи при живом соединении (например, сервер перезапускался): попробовать ещё раз позже. */
+  /**
+   * Сбой связи при живом соединении (сервер перезапускался) или ограничение частоты (429):
+   * попробовать ещё раз позже. Пауза случайная, от одной до двух TRANSFER_RETRY_MS, чтобы
+   * десятки файлов альбома не пошли на сервер снова одновременно и не упёрлись в тот же лимит.
+   */
   private retryLater(fn: () => Promise<void>) {
     setTimeout(() => {
       if (this.transport?.isReady) void fn().catch(() => {})
-    }, TRANSFER_RETRY_MS)
+    }, TRANSFER_RETRY_MS * (1 + Math.random()))
   }
 
   /**

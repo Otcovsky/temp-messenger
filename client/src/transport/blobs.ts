@@ -31,6 +31,10 @@ function refusal(status: number): BlobError {
       return new BlobError(NO_FILES, true)
     case 403:
       return new BlobError('Сервер не принял подпись загрузки.', true)
+    case 429:
+      // Ограничение частоты запросов с одного адреса (nginx): много файлов сразу. Это не отказ —
+      // попытка повторится позже.
+      return new BlobError('Сервер просит подождать: слишком много файлов сразу.', false)
     default:
       // 5xx — сервер перезапускается или перегружен: попробуем позже
       return new BlobError(`Сервер отклонил файл (${status}).`, status < 500)
@@ -75,7 +79,22 @@ export async function getBlob(id: string): Promise<Bytes | null> {
   }
 }
 
-/** Сообщить серверу, что файл скачан: когда скачают все получатели, он его сотрёт. */
-export async function blobDone(id: string): Promise<void> {
-  await fetch(`${url(id)}/done`, { method: 'POST', cache: 'no-store' }).catch(() => {})
+/** Попыток сообщить «скачан»: паузы 1, 2, 4 … 32 с — около минуты в сумме. */
+const DONE_ATTEMPTS = 7
+
+/**
+ * Сообщить серверу, что файл скачан: когда скачают все получатели, он его сотрёт.
+ * Без этого файл пролежит на сервере до конца срока (7 дней) и займёт квоту отправителя,
+ * поэтому при ограничении частоты (429), сбое сервера (5xx) или связи запрос повторяется.
+ */
+export async function blobDone(id: string, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))): Promise<void> {
+  for (let i = 0; i < DONE_ATTEMPTS; i++) {
+    if (i > 0) await sleep(1000 * 2 ** (i - 1) * (0.5 + Math.random()))
+    try {
+      const res = await fetch(`${url(id)}/done`, { method: 'POST', cache: 'no-store' })
+      if (res.status !== 429 && res.status < 500) return
+    } catch {
+      // нет связи — попробуем ещё раз
+    }
+  }
 }
