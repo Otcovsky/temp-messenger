@@ -1,4 +1,4 @@
-import { Check, Loader2, Lock, LogOut, ShieldCheck, UserMinus, UserPlus, Users } from 'lucide-react'
+import { Check, Loader2, Lock, LogOut, ShieldCheck, Trash2, UserMinus, UserPlus, Users } from 'lucide-react'
 import { useState } from 'react'
 import { type GroupView, MAX_GROUP } from '../core/messenger'
 import type { Contact } from '../storage/db'
@@ -153,6 +153,8 @@ export function GroupInfoDialog({ group, onClose, onDeleted }: { group: GroupVie
   const [confirm, setConfirm] = useState(false)
   const [error, setError] = useState('')
   const active = !group.left
+  /** Создатель не выходит из группы, а удаляет её у всех */
+  const owner = group.amAdmin && active
 
   const run = async (fn: () => Promise<void>) => {
     setError('')
@@ -176,7 +178,7 @@ export function GroupInfoDialog({ group, onClose, onDeleted }: { group: GroupVie
 
       {group.left && (
         <p className="note note-warn mb-5">
-          {group.left === 'removed' ? 'Администратор удалил вас из этой группы.' : 'Вы вышли из этой группы.'} Переписка
+          {group.left === 'removed' ? 'Создатель удалил вас из этой группы.' : 'Вы вышли из этой группы.'} Переписка
           осталась только у вас.
         </p>
       )}
@@ -207,7 +209,7 @@ export function GroupInfoDialog({ group, onClose, onDeleted }: { group: GroupVie
           <li className="flex items-center gap-3 px-2 py-2">
             <Avatar name={m.profile!.name} size="sm" />
             <span className="min-w-0 flex-1 truncate font-medium">{m.profile!.name}</span>
-            <small className="muted shrink-0 text-xs">{group.amAdmin ? 'вы, администратор' : 'вы'}</small>
+            <small className="muted shrink-0 text-xs">{group.amAdmin ? 'вы, создатель' : 'вы'}</small>
           </li>
         )}
         {group.members.map((x) => (
@@ -223,7 +225,7 @@ export function GroupInfoDialog({ group, onClose, onDeleted }: { group: GroupVie
                 <Avatar name={x.name} size="sm" />
                 <span className="min-w-0 flex-1 truncate font-medium">{x.name}</span>
                 <small className={`shrink-0 text-xs ${x.contactId ? 'muted' : 'text-amber-600 dark:text-amber-400'}`}>
-                  {!x.contactId ? 'подключается…' : x.admin ? 'администратор' : ''}
+                  {!x.contactId ? 'подключается…' : x.admin ? 'создатель' : ''}
                 </small>
               </button>
               {group.amAdmin && active && (
@@ -268,23 +270,25 @@ export function GroupInfoDialog({ group, onClose, onDeleted }: { group: GroupVie
       {active && (
         <p className="muted mb-5 text-sm leading-relaxed">
           Каждое сообщение шифруется отдельно для каждого участника. Новые участники не видят прежнюю переписку. Тот, у
-          кого ещё «подключается», пока не получает ваши сообщения. Состав группы меняет только администратор.
+          кого ещё «подключается», пока не получает ваши сообщения. Менять состав и удалять группу может только её
+          создатель.
         </p>
       )}
       {error && <p className="note note-error mb-4">{error}</p>}
 
       {!confirm ? (
         <button className="btn btn-danger w-full" onClick={() => setConfirm(true)}>
-          <LogOut className="size-5" /> {active ? 'Выйти из группы…' : 'Удалить переписку…'}
+          {owner ? <Trash2 className="size-5" /> : <LogOut className="size-5" />}{' '}
+          {owner ? 'Удалить группу…' : active ? 'Выйти из группы…' : 'Удалить переписку…'}
         </button>
       ) : (
         <>
           <p className="mb-3 text-sm">
-            {active
-              ? group.amAdmin
-                ? 'Переписка удалится у вас, а управление группой перейдёт другому участнику.'
-                : 'Переписка удалится у вас, участники увидят, что вы вышли.'
-              : 'Переписка этой группы удалится с этого устройства.'}
+            {owner
+              ? 'Группа и вся её переписка удалятся у всех участников. Отменить это нельзя.'
+              : active
+                ? 'Переписка удалится у вас, участники увидят, что вы вышли.'
+                : 'Переписка этой группы удалится с этого устройства.'}
           </p>
           <div className="grid grid-cols-2 gap-2.5">
             <button className="btn btn-soft" onClick={() => setConfirm(false)}>
@@ -292,13 +296,15 @@ export function GroupInfoDialog({ group, onClose, onDeleted }: { group: GroupVie
             </button>
             <button
               className="btn btn-danger-solid"
-              onClick={async () => {
-                await m.leaveGroup(group.id)
-                onClose()
-                onDeleted()
-              }}
+              onClick={() =>
+                void run(async () => {
+                  await (owner ? m.deleteGroup(group.id) : m.leaveGroup(group.id))
+                  onClose()
+                  onDeleted()
+                })
+              }
             >
-              {active ? 'Выйти' : 'Удалить'}
+              {owner ? 'Удалить у всех' : active ? 'Выйти' : 'Удалить'}
             </button>
           </div>
         </>

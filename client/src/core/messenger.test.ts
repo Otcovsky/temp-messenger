@@ -638,7 +638,7 @@ describe('группы', () => {
     expect(await notes(bob, gid)).toContain('Дэйв теперь в группе')
   })
 
-  it('выход из группы; администратор, уходя, передаёт управление', async () => {
+  it('выход из группы; создатель выйти не может', async () => {
     const { alice, bob, carol, gid } = await grouped()
     await bob.leaveGroup(gid)
     expect(await bob.group(gid)).toBeNull()
@@ -646,13 +646,54 @@ describe('группы', () => {
     await until(async () => (await carol.group(gid))!.members.length === 1)
     expect((await notes(carol, gid)).at(-1)).toBe('Боб вышел(ла) из группы')
 
-    await alice.leaveGroup(gid)
+    await expect(alice.leaveGroup(gid)).rejects.toThrow('только удалить')
+    expect((await alice.group(gid))!.amAdmin).toBe(true)
+  })
+
+  it('старый клиент: администратор, уходя, передаёт управление', async () => {
+    const { alice, bob, carol, gid, withCarol } = await grouped()
+    await bob.leaveGroup(gid)
+    await until(async () => (await carol.group(gid))!.members.length === 1)
+    // Так выходил администратор до того, как выход создателю запретили
+    const carolIk = (await alice.group(gid))!.members.find((m: any) => m.name === 'Кэрол')!.ik
+    await (alice as any).sendContent(await alice.contact(withCarol), {
+      id: 'H'.repeat(22), ts: Date.now(), type: 'group-leave', conv: gid, body: { admin: carolIk },
+    })
     await until(async () => (await carol.group(gid))!.amAdmin)
     expect((await carol.group(gid))!.members).toEqual([])
     expect((await notes(carol, gid)).at(-1)).toBe('Теперь группой управляете вы')
     // Новый администратор может переименовать группу
     await carol.renameGroup(gid, 'Одна')
     expect((await carol.group(gid))!.title).toBe('Одна')
+  })
+
+  it('создатель удаляет группу — она стирается у всех вместе с файлами', async () => {
+    const { alice, bob, carol, gid } = await grouped()
+    await alice.sendFile(gid, new File([bytes(500)], 'фото.jpg', { type: 'image/jpeg' }))
+    await bob.sendText(gid, 'привет')
+    await until(async () => (await bob.messages(gid)).some((x: any) => x.file?.state === 'ready'))
+    await until(async () => (await chat(carol, gid)).length === 2)
+
+    // Участник удалить группу не может: ни через функцию, ни подделав сообщение
+    await expect(bob.deleteGroup(gid)).rejects.toThrow('только её создатель')
+    const bobAtCarol = (await carol.group(gid))!.members.find((m: any) => m.name === 'Боб')!
+    await (carol as any).sendContent(await carol.contact(bobAtCarol.contactId!), {
+      id: 'J'.repeat(22), ts: Date.now(), type: 'group-delete', conv: gid, body: {},
+    })
+    await settle()
+    expect(await bob.group(gid)).not.toBeNull()
+
+    await alice.deleteGroup(gid)
+    expect(await alice.group(gid)).toBeNull()
+    await until(async () => (await bob.group(gid)) === null)
+    await until(async () => (await carol.group(gid)) === null)
+    expect(await bob.messages(gid)).toEqual([])
+    expect(await (bob as any).db.getAll('files')).toEqual([])
+    expect((await bob.conversations()).map((c: any) => c.title)).toEqual(['Алиса'])
+    // Знакомство Боба и Кэрол держалось только на группе — канал закрыт, личный чат с Алисой жив
+    await until(async () => (await (bob as any).db.getAll('contacts')).length === 1)
+    await until(async () => (await (carol as any).db.getAll('contacts')).length === 1)
+    expect((await (bob as any).db.getAll('contacts'))[0].gone).toBeFalsy()
   })
 
   it('переименование доходит до участников, не-администратор менять группу не может', async () => {

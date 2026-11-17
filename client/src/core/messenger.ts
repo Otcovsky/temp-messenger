@@ -23,6 +23,7 @@ import { type RatchetState, ratchetDecrypt, ratchetEncrypt } from '../crypto/rat
 import {
   type CallContent,
   type Content,
+  type GroupDeleteContent,
   type GroupIntroContent,
   type GroupLeaveContent,
   type GroupMemberInfo,
@@ -280,7 +281,9 @@ export class Messenger {
     try {
       this.setPushEndpoint(null)
       for (const g of await this.db.getAll('conversations')) {
-        if (g.group && !g.group.left) await this.announceLeave(g).catch(() => {})
+        if (!g.group || g.group.left) continue
+        // Свою группу создатель не покидает, а удаляет у всех
+        await (g.group.admin === 'me' ? this.announceDelete(g) : this.announceLeave(g)).catch(() => {})
       }
       const contacts = await this.db.getAll('contacts')
       await Promise.all(contacts.map((c) => this.sendGoodbye(c).catch(() => {})))
@@ -977,6 +980,8 @@ export class Messenger {
         return this.applyGroupState(tx, contact, c)
       case 'group-leave':
         return this.applyGroupLeave(tx, contact, c)
+      case 'group-delete':
+        return this.applyGroupDelete(tx, contact, c)
       case 'group-intro':
         return () => void this.onGroupIntro(contact, c).catch((e) => console.warn('Знакомство по группе не удалось', e))
       case 'call-offer':
@@ -1113,7 +1118,7 @@ export class Messenger {
 
   async deleteConversation(convId: string): Promise<void> {
     const conv = await this.db.get('conversations', convId)
-    if (conv?.group) return this.leaveGroup(convId)
+    if (conv?.group) return conv.group.admin === 'me' ? this.deleteGroup(convId) : this.leaveGroup(convId)
     const contact = await this.db.get('contacts', convId)
     // Собеседник ещё и участник общей группы: канал с ним нужен, так что удаляется только переписка
     const shared = !!contact && (await this.groupIks()).has(contact.ik)
@@ -1319,21 +1324,49 @@ export class Messenger {
     }
   }
 
-  /** Сообщить участникам, что я выхожу. Администратор при этом передаёт управление первому из них. */
+  /**
+   * Сообщить участникам, что я выхожу. Создатель не выходит, поэтому преемника (body.admin) этот
+   * клиент не называет; принимать такой выход от старых клиентов он по-прежнему умеет.
+   */
   private async announceLeave(conv: Conversation): Promise<void> {
-    const g = conv.group!
-    const targets = await this.groupTargets(g)
-    const body = g.admin === 'me' && targets.length ? { admin: targets[0].ik } : {}
+    const targets = await this.groupTargets(conv.group!)
     await Promise.allSettled(
-      targets.map((c) => this.sendContent(c, { id: randomId(), ts: Date.now(), type: 'group-leave', conv: conv.id, body })),
+      targets.map((c) => this.sendContent(c, { id: randomId(), ts: Date.now(), type: 'group-leave', conv: conv.id, body: {} })),
     )
   }
 
-  /** Выйти из группы и удалить её переписку у себя. */
+  /** Сообщить участникам, что я (создатель) удаляю группу: у них она сотрётся. */
+  private async announceDelete(conv: Conversation): Promise<void> {
+    const targets = await this.groupTargets(conv.group!)
+    await Promise.allSettled(
+      targets.map((c) => this.sendContent(c, { id: randomId(), ts: Date.now(), type: 'group-delete', conv: conv.id, body: {} })),
+    )
+  }
+
+  /** Выйти из группы и удалить её переписку у себя. Создатель выйти не может — только удалить группу. */
   async leaveGroup(gid: string): Promise<void> {
     const conv = await this.db.get('conversations', gid)
     if (!conv?.group) return
-    if (!conv.group.left) await this.announceLeave(conv)
+    if (!conv.group.left) {
+      if (conv.group.admin === 'me') throw new Error('Создатель не может выйти из группы — только удалить её')
+      await this.announceLeave(conv)
+    }
+    await this.eraseGroup(gid)
+  }
+
+  /** Удалить группу у всех участников. Может только создатель. */
+  async deleteGroup(gid: string): Promise<void> {
+    const conv = await this.db.get('conversations', gid)
+    if (!conv?.group) return
+    if (!conv.group.left) {
+      if (conv.group.admin !== 'me') throw new Error('Удалить группу может только её создатель')
+      await this.announceDelete(conv)
+    }
+    await this.eraseGroup(gid)
+  }
+
+  /** Стереть группу с этого устройства: беседу, переписку, файлы, ставшие ненужными каналы. */
+  private async eraseGroup(gid: string): Promise<void> {
     const msgs = await listMessages(this.db, gid)
     await writeAll(this.db, ['conversations', 'messages', 'files'], (tx) => [
       tx.objectStore('conversations').delete(gid),
@@ -1441,6 +1474,25 @@ export class Messenger {
     return () => {
       // Вышедший мог знать не всех — администратор сообщает новый состав остальным
       if (mine) void this.broadcastGroup(next).catch(() => {})
+      void this.dropOrphanContacts().catch(() => {})
+    }
+  }
+
+  /** Создатель удалил группу — стираем её у себя. Чужой приказ (не от администратора) игнорируется. */
+  private async applyGroupDelete(tx: ReceiveTx, contact: Contact, c: GroupDeleteContent): Promise<(() => void) | undefined> {
+    const gid = c.conv
+    if (typeof gid !== 'string' || !ID_RE.test(gid)) return
+    const conversations = tx.objectStore('conversations')
+    const conv = await conversations.get(gid)
+    if (!conv?.group || conv.group.admin !== contact.ik) return
+    const messages = tx.objectStore('messages')
+    const msgs = await messages.index('byConvTs').getAll(IDBKeyRange.bound([gid, -Infinity], [gid, Infinity]))
+    for (const m of msgs) await messages.delete(m.id)
+    await conversations.delete(gid)
+    // Файлы лежат в другом хранилище — стираем их сразу после фиксации
+    const files = msgs.filter((m) => m.type === 'file').map((m) => m.id)
+    return () => {
+      if (files.length) void writeAll(this.db, ['files'], (t) => files.map((id) => t.objectStore('files').delete(id))).catch(() => {})
       void this.dropOrphanContacts().catch(() => {})
     }
   }

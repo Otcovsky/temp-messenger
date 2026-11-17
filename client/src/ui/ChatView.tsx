@@ -131,8 +131,12 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
   const { contact, group } = chat
   if (!contact && !group)
     return (
-      <section className={`${shell} items-center justify-center`}>
+      <section className={`${shell} items-center justify-center gap-4`}>
         <p className="muted">Чат удалён.</p>
+        {/* На телефоне списка чатов рядом нет — без этой кнопки отсюда не уйти */}
+        <button className="btn btn-soft md:hidden" onClick={onBack}>
+          <ChevronLeft className="size-5" /> К чатам
+        </button>
       </section>
     )
 
@@ -258,7 +262,7 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
       {group?.left && (
         <div className="flex shrink-0 items-center gap-2 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-800 dark:text-amber-200">
           <UserX className="size-4 shrink-0" />{' '}
-          {group.left === 'removed' ? 'Администратор удалил вас из группы.' : 'Вы вышли из группы.'} Писать сюда больше нельзя.
+          {group.left === 'removed' ? 'Создатель удалил вас из группы.' : 'Вы вышли из группы.'} Писать сюда больше нельзя.
         </div>
       )}
       {gone && (

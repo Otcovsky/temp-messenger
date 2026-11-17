@@ -169,7 +169,14 @@ export interface GroupLeaveContent extends Base {
   body: { admin?: string }
 }
 
-export type GroupContent = GroupStateContent | GroupIntroContent | GroupLeaveContent
+/** Создатель удалил группу: получатель стирает её у себя вместе с перепиской. Шлёт только администратор. */
+export interface GroupDeleteContent extends Base {
+  type: 'group-delete'
+  conv: string
+  body: Record<string, never>
+}
+
+export type GroupContent = GroupStateContent | GroupIntroContent | GroupLeaveContent | GroupDeleteContent
 
 export type Content =
   | TextContent
@@ -194,5 +201,5 @@ export function decodeContent(b: Bytes): Content | null {
 
 const KNOWN_TYPES = new Set([
   'text', 'file', 'hello', 'receipt', 'goodbye', 'call-offer', 'call-answer', 'call-ice', 'call-media', 'call-end',
-  'group-state', 'group-intro', 'group-leave',
+  'group-state', 'group-intro', 'group-leave', 'group-delete',
 ])
