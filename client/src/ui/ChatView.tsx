@@ -15,6 +15,7 @@ import {
   ShieldCheck,
   Trash2,
   UserX,
+  Video,
 } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { startCall } from '../core/calls'
@@ -173,9 +174,19 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
           </span>
         </button>
         {!contact.gone && contact.theirMailbox && (
-          <button className="btn-icon" onClick={() => void startCall(convId)} aria-label="Позвонить" title="Позвонить">
-            <Phone className="size-5.5" />
-          </button>
+          <>
+            <button className="btn-icon" onClick={() => void startCall(convId)} aria-label="Позвонить" title="Позвонить">
+              <Phone className="size-5.5" />
+            </button>
+            <button
+              className="btn-icon"
+              onClick={() => void startCall(convId, true)}
+              aria-label="Видеозвонок"
+              title="Видеозвонок"
+            >
+              <Video className="size-5.5" />
+            </button>
+          </>
         )}
         <button className="btn-icon" onClick={() => setInfo(true)} aria-label="О чате" title="О чате">
           <Info className="size-5.5" />

@@ -903,6 +903,7 @@ export class Messenger {
       case 'call-offer':
       case 'call-answer':
       case 'call-ice':
+      case 'call-media':
       case 'call-end':
         if (!c.body || typeof c.body.call !== 'string' || !ID_RE.test(c.body.call)) return
         return () => this.onCall?.(contact, c)
@@ -1141,10 +1142,10 @@ export function callLabel(mine: boolean, call: CallInfo): string {
     case 'answered': {
       const s = Math.max(0, Math.round(call.duration ?? 0))
       const time = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
-      return `${mine ? 'Исходящий' : 'Входящий'} звонок · ${time}`
+      return `${mine ? 'Исходящий' : 'Входящий'} ${call.video ? 'видеозвонок' : 'звонок'} · ${time}`
     }
     case 'missed':
-      return 'Пропущенный звонок'
+      return call.video ? 'Пропущенный видеозвонок' : 'Пропущенный звонок'
     case 'declined':
       return mine ? 'Звонок отклонён' : 'Отклонённый звонок'
     case 'noanswer':

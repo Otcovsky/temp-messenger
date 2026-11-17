@@ -100,12 +100,20 @@ export type CallEndReason = 'hangup' | 'decline' | 'busy' | 'timeout' | 'failed'
 
 export interface CallOfferContent extends Base {
   type: 'call-offer'
-  body: { call: string; sdp: string }
+  /** video — звонящий включил камеру (видеозвонок) */
+  body: { call: string; sdp: string; video?: boolean }
 }
 
 export interface CallAnswerContent extends Base {
   type: 'call-answer'
-  body: { call: string; sdp: string }
+  /** video — ответивший включил камеру */
+  body: { call: string; sdp: string; video?: boolean }
+}
+
+/** Собеседник включил или выключил камеру посреди разговора. */
+export interface CallMediaContent extends Base {
+  type: 'call-media'
+  body: { call: string; video: boolean }
 }
 
 /** Адреса для соединения, найденные уже после отправки offer/answer. */
@@ -119,7 +127,12 @@ export interface CallEndContent extends Base {
   body: { call: string; reason: CallEndReason }
 }
 
-export type CallContent = CallOfferContent | CallAnswerContent | CallIceContent | CallEndContent
+export type CallContent =
+  | CallOfferContent
+  | CallAnswerContent
+  | CallIceContent
+  | CallMediaContent
+  | CallEndContent
 
 export type Content = TextContent | FileContent | HelloContent | ReceiptContent | GoodbyeContent | CallContent
 
@@ -136,5 +149,5 @@ export function decodeContent(b: Bytes): Content | null {
 }
 
 const KNOWN_TYPES = new Set([
-  'text', 'file', 'hello', 'receipt', 'goodbye', 'call-offer', 'call-answer', 'call-ice', 'call-end',
+  'text', 'file', 'hello', 'receipt', 'goodbye', 'call-offer', 'call-answer', 'call-ice', 'call-media', 'call-end',
 ])

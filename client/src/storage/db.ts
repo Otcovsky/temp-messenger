@@ -81,6 +81,8 @@ export interface CallInfo {
   outcome: 'answered' | 'missed' | 'declined' | 'noanswer' | 'busy' | 'cancelled' | 'failed'
   /** Длительность разговора, секунды */
   duration?: number
+  /** Видеозвонок (кто-то из двоих включал камеру или звонок был начат с видео) */
+  video?: boolean
 }
 
 export interface FileInfo {
