@@ -589,6 +589,29 @@ describe('группы', () => {
     expect(await chat(carol, gid)).toEqual([])
   })
 
+  it('своё имя для участника: видно только мне, в личном чате и в группе', async () => {
+    const { alice, bob, carol, withBob, gid } = await grouped()
+    // Кэрол знакома Бобу только по группе — личного чата нет, но подписать её по-своему можно
+    const carolAtBob = (await bob.group(gid))!.members.find((m: any) => m.name === 'Кэрол')!
+    await bob.renameContact(carolAtBob.contactId!, '  Кэрол с работы  ')
+    const renamed = (await bob.group(gid))!.members.find((m: any) => m.ik === carolAtBob.ik)!
+    expect(renamed.name).toBe('Кэрол с работы')
+    expect(renamed.selfName).toBe('Кэрол')
+    expect((await bob.contactNames()).get(carolAtBob.contactId!)).toBe('Кэрол с работы')
+
+    // Личный чат: меняется и контакт, и заголовок в списке чатов
+    await alice.renameContact(withBob, 'Боб (сосед)')
+    expect((await alice.conversation(withBob))!.title).toBe('Боб (сосед)')
+    expect((await alice.group(gid))!.members.find((m: any) => m.contactId === withBob)!.name).toBe('Боб (сосед)')
+    expect(await bob.renameContact(withBob, '   ')).toBeUndefined() // пустое имя — ничего не меняется
+
+    // Остальные видят, как человек назвал себя сам: моё имя никуда не уходит
+    await alice.renameGroup(gid, 'Друзья 2')
+    await until(async () => (await carol.group(gid))!.title === 'Друзья 2')
+    expect((await carol.group(gid))!.members.map((m: any) => m.name).sort()).toEqual(['Алиса', 'Боб'])
+    expect(relay.seen.some((p) => p.includes('сосед') || p.includes('с работы'))).toBe(false)
+  })
+
   it('удалённый участник перестаёт получать сообщения и писать', async () => {
     const { alice, bob, carol, gid } = await grouped()
     const carolIk = (await alice.group(gid))!.members.find((m: any) => m.name === 'Кэрол')!.ik

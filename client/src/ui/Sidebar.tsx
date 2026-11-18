@@ -40,7 +40,7 @@ export function Sidebar({
       <header className="shrink-0 bg-aurora px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-4">
         <div className="flex items-center gap-3">
           <div className="min-w-0 flex-1">
-            <h1 className="text-[28px] leading-tight font-extrabold tracking-tight">Чаты</h1>
+            <h1 className="text-[28px] leading-tight font-extrabold tracking-tight">Temp Messenger</h1>
             <p className="muted flex items-center gap-1.5 text-[13px]">
               <span className={`size-2 rounded-full ${status.dot}`} />
               {status.text}

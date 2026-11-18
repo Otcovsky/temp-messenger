@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { type GroupView, MAX_GROUP } from '../core/messenger'
 import type { Contact } from '../storage/db'
 import { Avatar } from './Avatar'
+import { ContactNameForm } from './ContactName'
 import { useLive, useMessenger } from './hooks'
 import { Modal } from './Modal'
 
@@ -126,11 +127,15 @@ export function CreateGroupDialog({ onClose, onCreated }: { onClose: () => void;
   )
 }
 
-/** Код безопасности участника: сверить, что знакомство через администратора не подменили. */
-function MemberSafety({ contactId }: { contactId: string }) {
+/**
+ * Раскрытый участник: своё имя для него (если несколько человек назвались одинаково) и код безопасности —
+ * сверить, что знакомство через администратора не подменили.
+ */
+function MemberDetails({ member, contactId }: { member: GroupView['members'][number]; contactId: string }) {
   const safety = useLive((m) => m.safetyNumber(contactId), [contactId])
   return (
     <div className="mt-1 mb-2 ml-13 rounded-2xl bg-brand-soft p-3 text-sm">
+      <ContactNameForm className="mb-3" contactId={contactId} name={member.name} selfName={member.selfName} />
       <p className="mb-1 flex items-center gap-1.5 font-medium">
         <ShieldCheck className="size-4" /> Код безопасности
       </p>
@@ -204,6 +209,9 @@ export function GroupInfoDialog({ group, onClose, onDeleted }: { group: GroupVie
       )}
 
       <h3 className="section-title">Участники</h3>
+      {group.members.some((x) => x.contactId) && (
+        <p className="muted -mt-1 mb-2 text-xs">Нажмите на участника, чтобы подписать его по-своему или сверить код.</p>
+      )}
       <ul className="-mx-2 mb-4 grid gap-0.5">
         {active && (
           <li className="flex items-center gap-3 px-2 py-2">
@@ -239,7 +247,7 @@ export function GroupInfoDialog({ group, onClose, onDeleted }: { group: GroupVie
                 </button>
               )}
             </div>
-            {open === x.ik && x.contactId && <MemberSafety contactId={x.contactId} />}
+            {open === x.ik && x.contactId && <MemberDetails member={x} contactId={x.contactId} />}
           </li>
         ))}
       </ul>

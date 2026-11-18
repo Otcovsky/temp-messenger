@@ -1141,14 +1141,30 @@ export class Messenger {
     this.emit()
   }
 
-  async renameContact(convId: string, name: string): Promise<void> {
-    const contact = await this.db.get('contacts', convId)
-    const conv = await this.db.get('conversations', convId)
-    name = name.trim().slice(0, 64)
-    if (!contact || !conv || !name) return
-    await this.db.put('contacts', { ...contact, name })
-    await this.db.put('conversations', { ...conv, title: name })
+  /**
+   * Своё имя для человека — видно только мне. Меняется у всех его контактов (личного и «по группе»),
+   * и у личного чата, если он есть. Собеседникам и группе не отправляется.
+   */
+  async renameContact(contactId: string, name: string): Promise<void> {
+    const contact = await this.db.get('contacts', contactId)
+    name = name.trim().slice(0, NAME_MAX)
+    if (!contact || !name) return
+    const same = (await this.db.getAll('contacts')).filter((c) => c.ik === contact.ik)
+    const convs: Conversation[] = []
+    for (const c of same) {
+      const conv = await this.db.get('conversations', c.id)
+      if (conv && conv.kind === 'direct') convs.push(conv)
+    }
+    await writeAll(this.db, ['contacts', 'conversations'], (tx) => [
+      ...same.map((c) => tx.objectStore('contacts').put({ ...c, name })),
+      ...convs.map((conv) => tx.objectStore('conversations').put({ ...conv, title: name })),
+    ])
     this.emit()
+  }
+
+  /** Имена контактов по id: подписи в группе показываем по нынешнему имени, а не по тому, что было при получении. */
+  async contactNames(): Promise<Map<string, string>> {
+    return new Map((await this.db.getAll('contacts')).map((c) => [c.id, c.name]))
   }
 
   conversations(): Promise<Conversation[]> {
@@ -1587,7 +1603,7 @@ export class Messenger {
     const members: GroupView['members'] = []
     for (const m of g.roster) {
       const c = await this.contactByIk(m.ik)
-      members.push({ ik: m.ik, name: c?.name ?? m.name, contactId: c?.id ?? null, admin: g.admin === m.ik })
+      members.push({ ik: m.ik, name: c?.name ?? m.name, selfName: c?.selfName ?? m.name, contactId: c?.id ?? null, admin: g.admin === m.ik })
     }
     return { id: gid, title: conv.title, amAdmin: g.admin === 'me', left: g.left ?? null, members }
   }
@@ -1604,7 +1620,8 @@ export interface GroupView {
   title: string
   amAdmin: boolean
   left: 'left' | 'removed' | null
-  members: { ik: string; name: string; contactId: string | null; admin: boolean }[]
+  /** name — как подписан у меня (можно переименовать), selfName — как человек назвал себя сам */
+  members: { ik: string; name: string; selfName: string; contactId: string | null; admin: boolean }[]
 }
 
 type GroupTx = WriteTx<('conversations' | 'messages')[]>

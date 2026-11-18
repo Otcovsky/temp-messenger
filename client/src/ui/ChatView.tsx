@@ -25,6 +25,7 @@ import { AttachmentTray, MAX_ATTACHMENTS } from './AttachmentTray'
 import { Avatar } from './Avatar'
 import { FileCard, FileMessage, MediaTile, isInlineImage, isInlineMime } from './FileMessage'
 import { formatDay } from './format'
+import { ContactNameForm } from './ContactName'
 import { GroupInfoDialog, membersCount } from './GroupUi'
 import { useLive, useMessenger } from './hooks'
 import { Modal } from './Modal'
@@ -36,6 +37,8 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
   // Беседа — либо личный чат (contact), либо группа (group); undefined — ещё загружается
   const chat = useLive(async (m) => ({ contact: await m.contact(convId), group: await m.group(convId) }), [convId])
   const messages = useLive((m) => m.messages(convId), [convId])
+  // Подписи в группе — по нынешнему имени контакта: его могли переименовать после получения
+  const names = useLive((m) => m.contactNames(), [])
   const [text, setText] = useState('')
   const [info, setInfo] = useState(false)
   const [error, setError] = useState('')
@@ -248,6 +251,7 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
               parts={item.parts}
               prev={items[i - 1]?.parts[0]}
               next={items[i + 1]?.parts[0]}
+              senderName={item.parts[0].fromName && (names?.get(item.parts[0].from) ?? item.parts[0].fromName)}
               onRetry={() => {
                 for (const p of item.parts)
                   if (p.status === 'failed')
@@ -403,12 +407,15 @@ function MessageRow({
   parts,
   prev,
   next,
+  senderName,
   onRetry,
   animate,
 }: {
   parts: Message[]
   prev?: Message
   next?: Message
+  /** В группе — кто написал (для своих и служебных сообщений не нужно) */
+  senderName?: string
   onRetry: () => void
   /** Сообщение пришло или отправлено при открытом чате — пузырь появляется с анимацией */
   animate: boolean
@@ -448,8 +455,8 @@ function MessageRow({
     <>
       {day}
       {/* В группе над первой репликой серии — кто пишет */}
-      {!mine && msg.fromName && groupStart && (
-        <div className="mt-2 -mb-1.5 ml-3 text-xs font-semibold text-violet-600 dark:text-violet-300">{msg.fromName}</div>
+      {!mine && senderName && groupStart && (
+        <div className="mt-2 -mb-1.5 ml-3 text-xs font-semibold text-violet-600 dark:text-violet-300">{senderName}</div>
       )}
       <div className={`flex ${mine ? 'justify-end' : 'justify-start'} ${groupStart ? 'mt-2' : 'mt-0.5'}`}>
         {parts.length > 1 ? (
@@ -627,7 +634,6 @@ function ChatInfo({ convId, onClose, onDeleted }: { convId: string; onClose: () 
   const m = useMessenger()
   const contact = useLive((m) => m.contact(convId), [convId])
   const safety = useLive((m) => m.safetyNumber(convId), [convId])
-  const [name, setName] = useState<string | null>(null)
   const [confirm, setConfirm] = useState(false)
 
   if (!contact) return null
@@ -641,29 +647,7 @@ function ChatInfo({ convId, onClose, onDeleted }: { convId: string; onClose: () 
         </p>
       </div>
 
-      <form
-        className="mb-6"
-        onSubmit={(e) => {
-          e.preventDefault()
-          if (name?.trim()) void m.renameContact(convId, name).then(() => setName(null))
-        }}
-      >
-        <label className="section-title block" htmlFor="contact-name">
-          Имя собеседника (видно только вам)
-        </label>
-        <div className="flex gap-2">
-          <input
-            id="contact-name"
-            className="field"
-            value={name ?? contact.name}
-            maxLength={64}
-            onChange={(e) => setName(e.target.value)}
-          />
-          <button className="btn btn-soft shrink-0" disabled={name === null || !name.trim()}>
-            Сохранить
-          </button>
-        </div>
-      </form>
+      <ContactNameForm className="mb-6" contactId={contact.id} name={contact.name} selfName={contact.selfName} />
 
       <h3 className="section-title flex items-center gap-1.5">
         <ShieldCheck className="size-4" /> Код безопасности
