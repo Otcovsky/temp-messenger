@@ -27,7 +27,9 @@ class Settings:
     rate_per_sec: float = float(os.environ.get("TM_RATE_PER_SEC", 20))
     rate_burst: int = _int("TM_RATE_BURST", 200)
     cleanup_interval_sec: int = _int("TM_CLEANUP_INTERVAL_SEC", 600)
-    auth_timeout_sec: int = _int("TM_AUTH_TIMEOUT_SEC", 15)
+    # Сколько ждать подписи после challenge. Клиенту хватает одного круга по сети (ключ уже в памяти),
+    # а соединение без входа занимает место в nginx — чем короче, тем дороже держать их пачкой.
+    auth_timeout_sec: int = _int("TM_AUTH_TIMEOUT_SEC", 5)
     # Файлы: зашифрованные клиентом, лежат на диске до скачивания всеми получателями или до TTL
     blob_dir: str = os.environ.get("TM_BLOB_DIR", "blobs")
     # Шифротекст файла: клиент пускает файлы до 25 МиБ, дополнение и тег добавляют меньше 1 МиБ

@@ -53,6 +53,22 @@ journalctl --user -u temp-messenger -f
 sudo bash ~/temp-messenger/deploy/nginx-add-blobs.sh
 ```
 
+## Ограничения на один IP: `/etc/nginx/conf.d/tm-limits.conf` (нужен sudo)
+
+Этого файла нет в репозитории: зоны создаются на сервере, а в сайте (`limit_conn`, `limit_req`)
+на них ссылаются. На chat.tempmessenger.tech сейчас:
+
+| что | где | порог |
+|---|---|---|
+| одновременных соединений с IP | весь сайт, `limit_conn tm_conn` | **20** |
+| запросов страниц | весь сайт, зона `tm_page` | 20/с, всплеск 100 |
+| новых WebSocket | `location = /ws`, зона `tm_ws` | 2/с, всплеск 30 |
+| запросов файлов | `location /blob/`, зона `tm_blob` | 5/с, всплеск 50 |
+
+Сверх порога — 429. Человеку нужно 1–3 WebSocket (вкладки, телефон) и пара загрузок, так что 20
+соединений хватает с запасом даже за мобильным NAT. До 2026-11-18 было 100 — тогда, чтобы занять
+все места на сервере, хватало ~40 адресов, теперь нужно ~1000.
+
 ## Больше 760 человек онлайн: разовая правка nginx.conf (нужен sudo)
 
 По умолчанию в `/etc/nginx/nginx.conf` стоит `worker_connections 768`. Каждое WebSocket-соединение
@@ -65,6 +81,12 @@ sudo sed -i -e 's/^\tworker_connections 768;/\tworker_connections 4096;/' \
   -e 's|^pid /run/nginx.pid;|pid /run/nginx.pid;\nworker_rlimit_nofile 8192;|' /etc/nginx/nginx.conf
 sudo nginx -t && sudo systemctl reload nginx
 ```
+
+Так потолок ~4000 человек. На chat.tempmessenger.tech с 2026-11-18 стоит `worker_connections 20480`
+и `worker_rlimit_nofile 65536` — потолок ~20 000: занять все места с 20 соединений на IP можно
+только с ~1000 адресов. Память это позволяет (~85 КБ на человека в ретрансляторе, ~1,7 ГБ на 20 000).
+Выше 20 000 упрётся в локальные порты: nginx ходит к ретранслятору на 127.0.0.1, а
+`ip_local_port_range` по умолчанию даёт ~28 000 портов.
 
 Ретранслятору лимит открытых файлов поднимает сам юнит (`LimitNOFILE=65536` в `temp-messenger.service`).
 
