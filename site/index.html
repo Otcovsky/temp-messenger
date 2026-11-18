@@ -43,6 +43,7 @@
       "url": "https://tempmessenger.tech/",
       "applicationCategory": "CommunicationApplication",
       "operatingSystem": "Android 7.0+, Web",
+      "softwareVersion": "__APK_VERSION__ (бета)",
       "description": "Одноразовый мессенджер со сквозным шифрованием без регистрации, номера телефона и почты. Сообщения, файлы и звонки; переписка хранится только на устройстве.",
       "image": "https://tempmessenger.tech/og.png",
       "offers": { "@type": "Offer", "price": "0", "priceCurrency": "RUB" },
@@ -87,6 +88,11 @@
           "@type": "Question",
           "name": "Почему APK, а не Google Play?",
           "acceptedAnswer": { "@type": "Answer", "text": "Приложение готовится к публикации в магазинах. Пока его можно установить файлом: Android один раз попросит разрешить установку из этого источника." }
+        },
+        {
+          "@type": "Question",
+          "name": "Это уже готовая версия?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Нет, это ранняя бета. Основное уже работает: переписка, файлы, группы, звонки. Но возможны ошибки, а возможности будут дорабатываться и пополняться." }
         },
         {
           "@type": "Question",
@@ -207,6 +213,14 @@ p { margin: 0; }
   background: var(--brand-soft); color: var(--violet);
 }
 .badge .icon { width: 18px; height: 18px; }
+.badges { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.badges .badge { margin-bottom: 0; }
+.badge-beta { background: var(--warn-bg); color: var(--warn-text); border: 1px solid var(--warn-line); padding-left: 12px; }
+.beta { padding: 2px 7px; border-radius: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; background: var(--warn-bg); color: var(--warn-text); border: 1px solid var(--warn-line); }
+.logo { white-space: nowrap; }
+@media (max-width: 420px) { .logo .beta { display: none; } }
+.beta-note { max-width: 820px; margin: 18px auto 0; display: flex; gap: 12px; align-items: flex-start; text-align: left; padding: 16px 18px; border-radius: 16px; font-size: 15px; background: var(--warn-bg); color: var(--warn-text); border: 1px solid var(--warn-line); }
+.beta-note .icon { margin-top: 1px; }
 .hero h1 { font-size: clamp(34px, 7.2vw, 58px); font-weight: 850; }
 .lead { margin-top: 18px; font-size: clamp(17px, 2.3vw, 20px); color: var(--muted); max-width: 34em; }
 .cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
@@ -304,6 +318,7 @@ footer nav { display: flex; flex-wrap: wrap; gap: 8px 20px; }
 footer a { text-decoration: none; }
 footer a:hover { color: var(--text); }
 </style>
+<!--__ANALYTICS__-->
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -332,6 +347,7 @@ footer a:hover { color: var(--text); }
     <a class="logo" href="/" aria-label="Temp Messenger — на главную">
       <img src="/icon-192.png" width="30" height="30" alt="">
       <span>Temp Messenger</span>
+      <span class="beta" title="Ранняя бета-версия">бета</span>
     </a>
     <nav class="nav" aria-label="Разделы">
       <a href="#features">Возможности</a>
@@ -347,7 +363,10 @@ footer a:hover { color: var(--text); }
   <section class="hero">
     <div class="wrap">
       <div>
-        <span class="badge"><svg class="icon"><use href="#i-shield"/></svg>Сквозное шифрование</span>
+        <div class="badges">
+          <span class="badge"><svg class="icon"><use href="#i-shield"/></svg>Сквозное шифрование</span>
+          <span class="badge badge-beta">Ранняя бета-версия</span>
+        </div>
         <h1>Мессенджер, который <span class="grad-text">ничего о&nbsp;вас не&nbsp;знает</span></h1>
         <p class="lead">Без регистрации, номера телефона и почты. Сообщения, файлы и звонки шифруются на вашем устройстве — и хранятся только на нём.</p>
         <div class="cta">
@@ -357,7 +376,7 @@ footer a:hover { color: var(--text); }
         <ul class="facts">
           <li><svg class="icon"><use href="#i-check"/></svg>Бесплатно</li>
           <li><svg class="icon"><use href="#i-check"/></svg>Без аккаунта</li>
-          <li><svg class="icon"><use href="#i-check"/></svg>Без cookies и счётчиков</li>
+          <li><svg class="icon"><use href="#i-check"/></svg>Браузер и Android</li>
         </ul>
       </div>
 
@@ -490,6 +509,10 @@ footer a:hover { color: var(--text); }
           <p>Приложение готовится к публикации в магазинах. Пока его можно установить файлом: Android один раз попросит разрешить установку из этого источника.</p>
         </details>
         <details>
+          <summary>Это уже готовая версия?<svg class="icon"><use href="#i-chevron"/></svg></summary>
+          <p>Нет, это ранняя бета. Основное уже работает: переписка, файлы, группы, звонки. Но возможны ошибки, а возможности будут дорабатываться и пополняться.</p>
+        </details>
+        <details>
           <summary>Сколько это стоит?<svg class="icon"><use href="#i-chevron"/></svg></summary>
           <p>Бесплатно. Аккаунта нет, поэтому и подписки нет.</p>
         </details>
@@ -518,9 +541,10 @@ footer a:hover { color: var(--text); }
           <h3>Приложение для Android</h3>
           <p>Уведомления о сообщениях и входящих звонках, даже когда приложение закрыто. Установка файлом APK.</p>
           <a class="btn btn-primary" href="/download/temp-messenger.apk" download>Скачать APK<svg class="icon"><use href="#i-download"/></svg></a>
-          <p class="meta">Версия __APK_VERSION__ · __APK_SIZE__ · Android 7.0 и новее__APK_CERT__</p>
+          <p class="meta">Бета __APK_VERSION__ · __APK_SIZE__ · Android 7.0 и новее__APK_CERT__</p>
         </article>
       </div>
+      <p class="beta-note"><svg class="icon"><use href="#i-alert"/></svg><span><b>Это ранняя бета-версия.</b> Мессенджер активно дорабатывается: возможны ошибки, а возможности и внешний вид будут меняться и пополняться.</span></p>
     </div>
   </section>
 </main>

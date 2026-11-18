@@ -150,6 +150,13 @@ TM_APK=путь/к/app-release.apk bash deploy/deploy-site.sh   # без TM_APK 
 как `/download/temp-messenger.apk`. Картинка для соцсетей `site/og.png` рисуется из `site/og-card.html`
 (команда — в самом файле).
 
+Аналитика Google есть только на этом сайте (в чате её нет): контейнер Tag Manager `GTM-WCWTGS9G`,
+он задан в `site/build.sh` по умолчанию. Другой ID — `TM_GA_ID=GTM-...` или `G-...`, без аналитики —
+`TM_GA_ID=` (пусто). В страницу добавляются `/ga.js` (dataLayer, событие `file_download` при скачивании
+APK) и загрузчик Google. Что именно собирается, настраивается в самом контейнере в tagmanager.google.com.
+CSP в `nginx-landing.conf` разрешает адреса Google; на живом сервере эту строку правят вручную
+(certbot дописал в файл свои строки, копировать конфиг целиком нельзя).
+
 Разовая настройка (нужен sudo), после того как A-записи `@` и `www` указывают на сервер:
 
 ```bash
