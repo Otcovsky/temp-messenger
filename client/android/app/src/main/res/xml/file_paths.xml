@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Что приложение может отдать другим программам: только файлы, которые человек сам сохраняет
+     через «Поделиться» (временная папка shared/, см. src/native.ts) -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <cache-path name="shared" path="shared/" />
+</paths>

@@ -1,6 +1,8 @@
 import { Download, FileText, Loader2, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { Messenger } from '../core/messenger'
+import { saveFileNative } from '../native'
+import { isNativeApp } from '../platform'
 import type { Message } from '../storage/db'
 import { formatSize } from './format'
 import { useMessenger } from './hooks'
@@ -43,6 +45,7 @@ function useFileUrl(msgId: string, enabled: boolean, mime: string): string | nul
 async function saveFile(m: Messenger, msg: Message) {
   const data = await m.fileData(msg.id)
   if (!data || !msg.file) return
+  if (isNativeApp) return saveFileNative(msg.file.name, new Uint8Array(data))
   const url = URL.createObjectURL(new Blob([data], { type: 'application/octet-stream' }))
   const a = document.createElement('a')
   a.href = url

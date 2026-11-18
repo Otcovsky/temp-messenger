@@ -48,12 +48,22 @@ class Settings:
         ).split(",")
         if h.strip()
     )
+    # Пуши в Android-приложение через Firebase: путь к JSON-ключу сервисного аккаунта (секрет,
+    # хранится только на сервере). Пусто — приложению пуши не шлются. См. fcm.py.
+    fcm_credentials: str = os.environ.get("TM_FCM_CREDENTIALS", "")
     # Сколько пуш-сервис держит уведомление для выключенного телефона
     push_ttl_sec: int = _int("TM_PUSH_TTL_SEC", 24 * 3600)
     # Сколько ждать ack от получателя, прежде чем слать пуш: если он в сети и если нет
     # Живой клиент подтверждает за доли секунды, так что 2 с хватает, чтобы отличить его от уснувшего.
     push_delay_sec: float = float(os.environ.get("TM_PUSH_DELAY_SEC", 2))
     push_offline_delay_sec: float = float(os.environ.get("TM_PUSH_OFFLINE_DELAY_SEC", 0.3))
+    # Адреса страниц, которым разрешено обращаться к /blob с другого адреса (CORS), через запятую.
+    # Android-приложение открывает клиент с https://localhost (Capacitor). Пусто — только свой сайт.
+    app_origins: tuple[str, ...] = tuple(
+        o.strip().rstrip("/")
+        for o in os.environ.get("TM_APP_ORIGINS", "https://localhost").split(",")
+        if o.strip()
+    )
     # Звонки. Адреса STUN/TURN-серверов через запятую, например
     # "stun:chat.example:3478,turn:chat.example:3478?transport=udp,turn:chat.example:3478?transport=tcp".
     # Пусто — клиенты соединяются только напрямую (сработает в одной локальной сети).

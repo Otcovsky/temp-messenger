@@ -4,6 +4,7 @@
  */
 import { type Bytes, b64e, utf8 } from '../crypto/bytes'
 import { type KeyPair, sign } from '../crypto/primitives'
+import { serverOrigin } from '../platform'
 
 /**
  * Отказ при обмене файлом. permanent — повторять бессмысленно (сервер отказал);
@@ -41,7 +42,7 @@ function refusal(status: number): BlobError {
   }
 }
 
-const url = (id: string) => `${location.origin}/blob/${id}`
+const url = (id: string) => `${serverOrigin()}/blob/${id}`
 
 /** Загрузить шифротекст. recipients — сколько получателей должны скачать файл, прежде чем сервер его сотрёт. */
 export async function putBlob(id: string, ct: Bytes, recipients: number, auth: KeyPair): Promise<void> {

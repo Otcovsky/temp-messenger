@@ -3,6 +3,7 @@
  * и постоянное хранилище. Состояние отдаётся React через useSyncExternalStore.
  */
 import { useSyncExternalStore } from 'react'
+import { isNativeApp } from './platform'
 
 interface BeforeInstallPromptEvent extends Event {
   prompt(): Promise<void>
@@ -44,6 +45,7 @@ export function usePwa(): PwaState {
 /** Открыто как установленное приложение (а не во вкладке браузера) */
 export function isStandalone(): boolean {
   return (
+    isNativeApp ||
     matchMedia('(display-mode: standalone)').matches ||
     (navigator as Navigator & { standalone?: boolean }).standalone === true
   )
@@ -66,7 +68,8 @@ export function initPwa(): void {
   })
   void navigator.storage?.persisted?.().then((persisted) => set({ persisted }))
 
-  if (!import.meta.env.PROD || !('serviceWorker' in navigator)) return
+  // В Android-приложении код и так лежит в APK, а обновляется оно новым APK: service worker не нужен
+  if (!import.meta.env.PROD || isNativeApp || !('serviceWorker' in navigator)) return
 
   // Перезагружаемся, когда страницей начал управлять новый worker — в этой вкладке
   // или в другой (тогда старый кеш уже удалён и оставаться на старом коде нельзя).

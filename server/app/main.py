@@ -4,12 +4,14 @@
 
   ← challenge {nonce}
   → auth {pub, sig}            подпись Ed25519 над b"tm-auth-v1:" + nonce
-  ← ready {push?}              push — ключ VAPID, если сервер умеет слать пуш-уведомления
+  ← ready {push?, fcm?}        push — ключ VAPID, если сервер умеет слать пуш-уведомления;
+                               fcm: true — умеет слать их Android-приложению через Firebase
   → register {mailbox, invite?} ← registered {mailbox}, затем msg ... из очереди
   → probe {mailbox}            ← probe {mailbox, state: open|used|none}
   → unregister {mailbox}       ← unregistered {mailbox}
   → send {id, to:[...], payload, notify?, ttl?}  ← sent {id, failed:[{to, reason}]}
   → push-sub {endpoint, p256dh?, auth?}  ← push-sub {ok: true}
+  → push-sub {fcm, key}        то же из Android-приложения: токен FCM и ключ AES-256 (base64url)
   → push-unsub                 ← push-unsub {ok: true}
   → push-test {kind?}          ← push-test {status}   пробный пуш себе; status — ответ пуш-сервиса
   → ice                        ← ice {servers, ttl}   STUN/TURN для звонка с временным логином
@@ -35,9 +37,11 @@ from contextlib import asynccontextmanager
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 
 from .blobs import BlobFiles, add_blob_routes, cleanup_blobs
 from .config import Settings, settings as default_settings
+from .fcm import FCM_PREFIX, FcmSend, key_valid, token_valid
 from .push import KINDS, Pusher, PushSend, endpoint_allowed, keys_valid
 from .store import RegisterResult, Store
 
@@ -148,13 +152,15 @@ def read_version(path: str) -> str:
         return "dev"
 
 
-def create_app(cfg: Settings = default_settings, push_send: PushSend | None = None) -> FastAPI:
+def create_app(
+    cfg: Settings = default_settings, push_send: PushSend | None = None, fcm_send: FcmSend | None = None
+) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.store = Store(cfg.db_path)
         app.state.blobs = BlobFiles(cfg.blob_dir)
         app.state.hub = Hub()
-        app.state.pusher = Pusher(app.state.store, cfg, push_send)
+        app.state.pusher = Pusher(app.state.store, cfg, push_send, fcm_send)
         task = asyncio.create_task(cleanup_loop(app.state.store, app.state.blobs))
         try:
             yield
@@ -178,6 +184,16 @@ def create_app(cfg: Settings = default_settings, push_send: PushSend | None = No
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     version = read_version(cfg.version_file)
+    if cfg.app_origins:
+        # Файлы приложение качает по fetch с https://localhost — браузерный движок требует разрешения.
+        # Куки и прочие учётные данные не участвуют: доступ к файлам — по подписи в X-TM-Auth.
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(cfg.app_origins),
+            allow_methods=["GET", "PUT", "POST"],
+            allow_headers=["X-TM-Auth", "Content-Type"],
+            max_age=86400,
+        )
 
     @app.get("/health")
     async def health():
@@ -215,7 +231,12 @@ def create_app(cfg: Settings = default_settings, push_send: PushSend | None = No
 
         pusher: Pusher = app.state.pusher
         conn = Connection(ws, owner, cfg)
-        await conn.send({"t": "ready", "push": pusher.public_key} if pusher.enabled else {"t": "ready"})
+        ready: dict = {"t": "ready"}
+        if pusher.public_key:
+            ready["push"] = pusher.public_key
+        if pusher.fcm_enabled:
+            ready["fcm"] = True
+        await conn.send(ready)
         try:
             while True:
                 try:
@@ -318,8 +339,20 @@ def create_app(cfg: Settings = default_settings, push_send: PushSend | None = No
                 raise ProtocolError("bad_ack", mb)
             store.ack(mb, conn.owner, ids)
 
+        elif t == "push-sub" and "fcm" in frame:
+            # Android-приложение: токен FCM и ключ, которым шифруется пометка в пуше
+            if not pusher.fcm_enabled:
+                raise ProtocolError("push_disabled")
+            token, key = frame.get("fcm"), frame.get("key")
+            if not token_valid(token):
+                raise ProtocolError("bad_endpoint")
+            if not key_valid(key):
+                raise ProtocolError("bad_keys")
+            store.push_set(conn.owner, FCM_PREFIX + token, None, key)
+            await conn.send({"t": "push-sub", "ok": True})
+
         elif t == "push-sub":
-            if not pusher.enabled:
+            if pusher.vapid is None:
                 raise ProtocolError("push_disabled")
             endpoint = frame.get("endpoint")
             if not endpoint_allowed(endpoint, cfg.push_hosts):

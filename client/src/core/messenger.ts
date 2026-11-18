@@ -60,6 +60,7 @@ import {
   wipeStore,
   writeAll,
 } from '../storage/db'
+import { isNativeApp, serverOrigin } from '../platform'
 import { BlobError, blobDone, getBlob, putBlob } from '../transport/blobs'
 import { type ConnStatus, type InviteState, type ServerFrame, Transport, defaultServerUrl } from '../transport/ws'
 
@@ -266,8 +267,18 @@ export class Messenger {
     return this.transport?.pushKey ?? null
   }
 
-  /** Сообщить серверу адрес пуш-подписки этого браузера; null — отписаться. */
-  setPushEndpoint(sub: { endpoint: string; p256dh?: string; auth?: string } | null): boolean {
+  /** Сервер шлёт пуши Android-приложению через Firebase */
+  get pushFcm(): boolean {
+    return this.transport?.fcm ?? false
+  }
+
+  /**
+   * Сообщить серверу пуш-подписку этого устройства; null — отписаться.
+   * Браузер присылает адрес Web Push, Android-приложение — токен FCM и свой ключ шифрования пометки.
+   */
+  setPushEndpoint(
+    sub: { endpoint: string; p256dh?: string; auth?: string } | { fcm: string; key: string } | null,
+  ): boolean {
     return this.transport?.send(sub ? { t: 'push-sub', ...sub } : { t: 'push-unsub' }) ?? false
   }
 
@@ -413,7 +424,9 @@ export class Messenger {
   // --- приглашения -----------------------------------------------------------
 
   inviteLink(inv: PendingInvite): string {
-    return `${location.origin}${location.pathname}#i=${encodeInvite(inv.payload)}`
+    // Ссылку откроют в браузере, поэтому из приложения (https://localhost) она ведёт на сайт сервера
+    const page = isNativeApp ? `${serverOrigin()}/` : `${location.origin}${location.pathname}`
+    return `${page}#i=${encodeInvite(inv.payload)}`
   }
 
   /**

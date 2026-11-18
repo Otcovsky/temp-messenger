@@ -1,5 +1,6 @@
 import { Bell, BellOff, BellRing, Download, PhoneCall, RefreshCw, Smartphone, X } from 'lucide-react'
 import { useState } from 'react'
+import { isNativeApp } from '../platform'
 import { applyUpdate, isIos, isStandalone, promptInstall, usePwa } from '../pwa'
 import { disablePush, enablePush, testPush, usePush } from '../push'
 
@@ -156,15 +157,19 @@ export function NotificationsSection() {
   } else if (permission === 'denied') {
     body = (
       <p className="muted">
-        Уведомления запрещены в настройках браузера. Разрешите их для этого сайта и вернитесь сюда.
+        {isNativeApp
+          ? 'Уведомления запрещены в настройках телефона. Разрешите их для Temp Messenger (Настройки → Приложения) и вернитесь сюда.'
+          : 'Уведомления запрещены в настройках браузера. Разрешите их для этого сайта и вернитесь сюда.'}
       </p>
     )
   } else {
     body = (
       <>
         <p className="muted">
-          Когда приложение закрыто, сервер будит его через пуш-сервис браузера (Google, Apple или Mozilla). В
-          уведомлении нет ни текста, ни имени — только «Новое сообщение». Пуш-сервис узнаёт лишь время, когда вам
+          {isNativeApp
+            ? 'Когда приложение закрыто, сервер будит его через Google (Firebase). '
+            : 'Когда приложение закрыто, сервер будит его через пуш-сервис браузера (Google, Apple или Mozilla). '}
+          В уведомлении нет ни текста, ни имени — только «Новое сообщение». Пуш-сервис узнаёт лишь время, когда вам
           пишут.
         </p>
         {enabled ? (

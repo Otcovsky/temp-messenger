@@ -4,6 +4,7 @@
  */
 import { b64d, b64e, concat, utf8 } from '../crypto/bytes'
 import { type KeyPair, sign } from '../crypto/primitives'
+import { serverOrigin } from '../platform'
 
 export type ConnStatus = 'connecting' | 'online' | 'offline'
 
@@ -12,7 +13,7 @@ export type InviteState = 'open' | 'used' | 'none'
 
 export type ServerFrame =
   | { t: 'challenge'; nonce: string }
-  | { t: 'ready'; push?: string }
+  | { t: 'ready'; push?: string; fcm?: boolean }
   | { t: 'registered'; mailbox: string; created: boolean }
   | { t: 'unregistered'; mailbox: string }
   | { t: 'sent'; id: string; failed: { to: string; reason: string }[] }
@@ -42,8 +43,7 @@ const ALIVE_TIMEOUT_MS = 5_000
 const WAKE_TIMEOUT_MS = 1_500
 
 export function defaultServerUrl(): string {
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${proto}//${location.host}/ws`
+  return `${serverOrigin().replace(/^http/, 'ws')}/ws`
 }
 
 export class Transport {
@@ -59,6 +59,8 @@ export class Transport {
   status: ConnStatus = 'offline'
   /** Ключ VAPID сервера из кадра ready; null — сервер не умеет слать пуш-уведомления */
   pushKey: string | null = null
+  /** Сервер умеет слать пуши Android-приложению через Firebase (кадр ready) */
+  fcm = false
 
   constructor(
     private url: string,
@@ -174,6 +176,7 @@ export class Transport {
       } else if (f.t === 'ready') {
         this.ready = true
         this.pushKey = typeof f.push === 'string' ? f.push : null
+        this.fcm = f.fcm === true
         this.attempt = 0
         this.setStatus('online')
         this.pingTimer = setInterval(() => this.checkAlive(), PING_MS)

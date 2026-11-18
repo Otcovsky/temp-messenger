@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Temp Messenger</string>
+    <string name="title_activity_main">Temp Messenger</string>
+    <string name="package_name">tech.tempmessenger.app</string>
+    <string name="custom_url_scheme">tech.tempmessenger.app</string>
+</resources>

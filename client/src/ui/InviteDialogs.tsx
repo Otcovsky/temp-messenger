@@ -2,6 +2,8 @@ import { Check, ClipboardPaste, Copy, Link2, Loader2, ScanQrCode, Share2, Sparkl
 import QRCode from 'qrcode'
 import { useEffect, useMemo, useState } from 'react'
 import { type InvitePayload, type PendingInvite, decodeInvite } from '../crypto/handshake'
+import { shareLinkNative } from '../native'
+import { isNativeApp } from '../platform'
 import { Avatar } from './Avatar'
 import { useLive, useMessenger } from './hooks'
 import { Modal } from './Modal'
@@ -47,11 +49,13 @@ export function CreateInviteDialog({ onClose }: { onClose: () => void }) {
   }
 
   // На телефоне удобнее сразу отправить ссылку через системное меню «Поделиться»
-  const canShare = typeof navigator.share === 'function'
+  const canShare = isNativeApp || typeof navigator.share === 'function'
   const share = () =>
-    navigator.share({ title: 'Приглашение в Temp Messenger', url: link }).catch(() => {
-      /* пользователь закрыл меню */
-    })
+    isNativeApp
+      ? shareLinkNative('Приглашение в Temp Messenger', link)
+      : navigator.share({ title: 'Приглашение в Temp Messenger', url: link }).catch(() => {
+          /* пользователь закрыл меню */
+        })
 
   return (
     <Modal title="Пригласить собеседника" onClose={onClose}>

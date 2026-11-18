@@ -130,3 +130,35 @@ def test_cleanup_blobs(tmp_path):
     assert cleanup_blobs(store, files) == 1
     assert not os.listdir(files.root)
     store.close()
+
+
+def test_cors_allows_only_app_origin(client):
+    """Android-приложение (https://localhost) качает файлы с другого адреса — сервер это разрешает."""
+    bid = blob_id()
+    pre = client.options(
+        f"/blob/{bid}",
+        headers={
+            "Origin": "https://localhost",
+            "Access-Control-Request-Method": "PUT",
+            "Access-Control-Request-Headers": "x-tm-auth,content-type",
+        },
+    )
+    assert pre.status_code == 200
+    assert pre.headers["access-control-allow-origin"] == "https://localhost"
+    assert "PUT" in pre.headers["access-control-allow-methods"]
+    assert "access-control-allow-credentials" not in pre.headers
+
+    key = Ed25519PrivateKey.generate()
+    h = auth(key, bid, 3) | {"Origin": "https://localhost"}
+    assert put(client, key, bid, b"abc", headers=h).status_code == 201
+    got = client.get(f"/blob/{bid}", headers={"Origin": "https://localhost"})
+    assert got.content == b"abc"
+    assert got.headers["access-control-allow-origin"] == "https://localhost"
+
+    # Чужие сайты разрешения не получают
+    other = client.get(f"/blob/{bid}", headers={"Origin": "https://evil.example"})
+    assert "access-control-allow-origin" not in other.headers
+    bad = client.options(
+        f"/blob/{bid}", headers={"Origin": "https://evil.example", "Access-Control-Request-Method": "PUT"}
+    )
+    assert "access-control-allow-origin" not in bad.headers

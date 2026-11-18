@@ -52,6 +52,24 @@ cd server && .venv/Scripts/python -m pytest
 cd client && npm test
 ```
 
+## Android-приложение (APK)
+
+Тот же клиент, упакованный Capacitor в `client/android`. Код лежит внутри APK, сервер зашит при сборке:
+`VITE_SERVER_ORIGIN` (по умолчанию `https://chat.tempmessenger.tech`). Сервер должен разрешать адрес
+приложения `https://localhost` для `/blob` — это `TM_APP_ORIGINS`, по умолчанию так и есть.
+
+Нужны JDK 21, Android SDK (платформа 36) и переменные `JAVA_HOME`, `ANDROID_HOME`. Ключ подписи — вне
+репозитория: `~/.temp-messenger-keys/keystore.properties` (или путь в `TM_SIGNING_PROPS`). Без ключа
+обновление поверх установленного приложения невозможно — храните его копию.
+
+```
+cd client
+npm run apk        # → android/app/build/outputs/apk/release/app-release.apk
+```
+
+Перед каждой новой версией увеличьте `versionCode` в `client/android/app/build.gradle`.
+Значки: `node client/scripts/make-icons.mjs`. Пока без уведомлений (FCM — следующий этап).
+
 ## Выкладка
 
 См. [deploy/README.md](deploy/README.md).

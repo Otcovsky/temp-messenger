@@ -3,11 +3,14 @@
  *
  * Пуш приходит пустым — в нём нет ни текста, ни отправителя; service worker показывает
  * одно и то же «Новое сообщение». Включаются только явным нажатием в настройках.
+ * В Android-приложении вместо Web Push — Firebase (FCM): токен и уведомления даёт плагин TmPush.
  * Состояние отдаётся React через useSyncExternalStore, как в pwa.ts.
  */
 import { useSyncExternalStore } from 'react'
 import type { Messenger } from './core/messenger'
 import { b64d, b64e } from './crypto/bytes'
+import { type NativePermission, TmPush } from './native'
+import { isNativeApp } from './platform'
 
 export interface PushState {
   /** Браузер умеет Web Push и service worker работает (в режиме разработки его нет) */
@@ -36,12 +39,19 @@ const RING_EVERY_MS = 3_000
 const SW_TIMEOUT_MS = 8_000
 const TEST_TIMEOUT_MS = 20_000
 
-const supported =
+/** Браузер с Web Push. В Android-приложении его нет (WebView не умеет) — там FCM */
+const webSupported =
   import.meta.env.PROD &&
+  !isNativeApp &&
   typeof navigator !== 'undefined' &&
   'serviceWorker' in navigator &&
   'PushManager' in globalThis &&
   'Notification' in globalThis
+const supported = webSupported || isNativeApp
+
+function fromNative(p: NativePermission): NotificationPermission {
+  return p === 'prompt' ? 'default' : p
+}
 
 function readFlag(): boolean {
   try {
@@ -63,7 +73,7 @@ function writeFlag(on: boolean) {
 let state: PushState = {
   supported,
   serverReady: null,
-  permission: supported ? Notification.permission : 'default',
+  permission: webSupported ? Notification.permission : 'default',
   enabled: supported && readFlag(),
   confirmed: false,
   error: null,
@@ -106,7 +116,7 @@ export function initPush(m: Messenger): void {
     if (e.t === 'incoming') {
       void notifyIfHidden('Новое сообщение')
     } else if (e.t === 'ready') {
-      set({ serverReady: !!m.pushKey, confirmed: false })
+      set({ serverReady: isNativeApp ? m.pushFcm : !!m.pushKey, confirmed: false })
       void sync()
     } else if (e.t === 'test') {
       onTestResult(e.status)
@@ -120,6 +130,13 @@ export function initPush(m: Messenger): void {
     } else {
       set({ confirmed: false, error: refusal(e.code) })
     }
+  }
+  if (isNativeApp) {
+    // Уведомления убирает сам плагин, когда приложение выходит на экран
+    void TmPush.status()
+      .then((s) => set({ permission: fromNative(s.permission) }))
+      .catch(() => {})
+    return
   }
   if (!supported) return
   // Приложение на экране — уведомления больше не нужны
@@ -138,7 +155,7 @@ async function clearNotifications(tag?: string) {
 }
 
 async function showHidden(title: string, options: NotificationOptions & Record<string, unknown>) {
-  if (!supported || !state.enabled || document.visibilityState === 'visible') return
+  if (!webSupported || !state.enabled || document.visibilityState === 'visible') return
   if (Notification.permission !== 'granted') return
   try {
     const reg = await navigator.serviceWorker.getRegistration()
@@ -157,6 +174,11 @@ let ringTimer: ReturnType<typeof setInterval> | undefined
  */
 export function callAlert(kind: 'ring' | 'stop' | 'missed'): void {
   clearInterval(ringTimer)
+  if (isNativeApp) {
+    // Мелодия звонка повторяется сама (FLAG_INSISTENT), повторять уведомление не нужно
+    if (state.enabled || kind === 'stop') void TmPush.show({ kind: kind === 'ring' ? 'call' : kind }).catch(() => {})
+    return
+  }
   if (!supported) return
   if (kind === 'ring') {
     const ring = () =>
@@ -181,6 +203,7 @@ export function callAlert(kind: 'ring' | 'stop' | 'missed'): void {
  * уже забрано. Поэтому уведомление показываем сами — такое же, как по пушу (о звонке — со своим текстом).
  */
 export function notifyIfHidden(body: string): Promise<void> {
+  if (isNativeApp) return state.enabled ? TmPush.show({ kind: 'msg' }).catch(() => {}) : Promise.resolve()
   return showHidden('Temp Messenger', { body, tag: TAG, renotify: true })
 }
 
@@ -199,6 +222,7 @@ function activeWorker(): Promise<ServiceWorkerRegistration> {
 async function sync(renew = false): Promise<void> {
   const m = messenger
   if (!supported || !m || !state.enabled) return
+  if (isNativeApp) return syncNative(m, renew)
   const key = m.pushKey
   if (!key) return
   set({ permission: Notification.permission })
@@ -229,9 +253,47 @@ async function sync(renew = false): Promise<void> {
   }
 }
 
+/** То же для Android-приложения: токен FCM вместо подписки браузера. */
+async function syncNative(m: Messenger, renew: boolean): Promise<void> {
+  if (!m.pushFcm) return
+  try {
+    const s = await TmPush.status()
+    set({ permission: fromNative(s.permission) })
+    if (s.permission !== 'granted') {
+      // Уведомления запретили в настройках телефона
+      writeFlag(false)
+      set({ enabled: false, confirmed: false })
+      m.setPushEndpoint(null)
+      return
+    }
+    if (!s.available) {
+      set({ error: 'В этой сборке приложения нет настроек Firebase — уведомления не заработают.' })
+      return
+    }
+    if (renew) await TmPush.unregister() // Google сказал, что токена больше нет: берём новый
+    const { token, key } = await TmPush.register()
+    set({ error: null })
+    if (!m.setPushEndpoint({ fcm: token, key })) set({ error: 'Нет связи с сервером. Подписка отправится, когда связь появится.' })
+  } catch (e) {
+    console.warn('Не удалось получить токен FCM', e)
+    const why = e instanceof Error ? e.message : String(e)
+    set({
+      error: `Google не выдал токен для уведомлений (${why}). Нужны сервисы Google Play и связь с интернетом.`,
+    })
+  }
+}
+
 /** Включить уведомления. Вызывать только из обработчика нажатия: иначе браузер не спросит разрешение. */
 export async function enablePush(): Promise<void> {
   if (!supported) return
+  if (isNativeApp) {
+    const { permission } = await TmPush.requestPermission()
+    set({ permission: fromNative(permission), error: null, test: null })
+    if (permission !== 'granted') return
+    writeFlag(true)
+    set({ enabled: true })
+    return sync()
+  }
   const permission = await Notification.requestPermission()
   set({ permission, error: null, test: null })
   if (permission !== 'granted') return
@@ -245,6 +307,7 @@ export async function disablePush(): Promise<void> {
   set({ enabled: false, confirmed: false, error: null, test: null })
   // Если связи нет, сервер узнает об отписке от пуш-сервиса: тот ответит, что подписки больше нет
   messenger?.setPushEndpoint(null)
+  if (isNativeApp) return TmPush.unregister().catch(() => {})
   if (!supported) return
   try {
     const reg = await navigator.serviceWorker.getRegistration()
@@ -264,7 +327,8 @@ export async function testPush(kind?: 'call'): Promise<void> {
   testKind = kind
   set({ test: { text: kind ? 'Отправляю пробный звонок…' : 'Отправляю пробное уведомление…', ok: null } })
   try {
-    ;(await activeWorker()).active?.postMessage('pushTest')
+    if (isNativeApp) await TmPush.expectTest()
+    else (await activeWorker()).active?.postMessage('pushTest')
   } catch {
     return endTest('Service worker не запущен — перезапустите приложение.', false)
   }
@@ -289,7 +353,7 @@ function onTestResult(status: number) {
     endTest('Пуш-сервис ответил, что подписки больше нет. Получаю новую — нажмите «Проверить» ещё раз.', false)
     void sync(true)
   } else if (status === 0) {
-    endTest('Сервер не смог связаться с пуш-сервисом браузера.', false)
+    endTest(isNativeApp ? 'Сервер не смог связаться с Firebase.' : 'Сервер не смог связаться с пуш-сервисом браузера.', false)
   } else {
     endTest(`Пуш-сервис отклонил уведомление (HTTP ${status}).`, false)
   }

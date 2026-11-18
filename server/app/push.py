@@ -30,6 +30,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from .config import Settings
+from .fcm import FCM_PREFIX, Fcm, FcmSend, seal
 from .store import Store
 
 log = logging.getLogger("temp_messenger.push")
@@ -43,6 +44,8 @@ PushSend = Callable[[str, str, int, bytes | None], int]
 
 # Что сообщить телефону: значение notify из кадра send -> пометка в пуше (None — пуш пустой)
 KINDS: dict[object, bytes | None] = {True: None, "call": b'{"k":"call"}', "call-end": b'{"k":"end"}'}
+# То же для приложения (FCM): там пометка есть всегда, пустых пушей FCM не бывает
+FCM_MARKS: dict[object, bytes] = {True: b'{"k":"msg"}', "call": b'{"k":"call"}', "call-end": b'{"k":"end"}'}
 # Сколько пуш-сервис держит пуш о звонке: дольше вызов не длится, а опоздавший звонок не нужен
 CALL_PUSH_TTL_SEC = 45
 
@@ -172,11 +175,20 @@ def http_send(endpoint: str, authorization: str, ttl: int, body: bytes | None = 
 
 
 class Pusher:
-    def __init__(self, store: Store, cfg: Settings, send: PushSend | None = None):
+    def __init__(
+        self, store: Store, cfg: Settings, send: PushSend | None = None, fcm_send: FcmSend | None = None
+    ):
         self.store = store
         self.cfg = cfg
         self.send = send or http_send
         self.vapid = Vapid(store, cfg.push_subject) if cfg.push_subject else None
+        # Android-приложение: FCM, если на сервере есть ключ Firebase (или подставлен в тестах)
+        self.fcm_send: FcmSend | None = fcm_send
+        if self.fcm_send is None and cfg.fcm_credentials:
+            try:
+                self.fcm_send = Fcm(cfg.fcm_credentials).send
+            except Exception as e:  # сервер без пушей в приложение лучше, чем неработающий сервер
+                log.error("FCM disabled, cannot load credentials: %s", e)
         # Владелец ящиков -> сообщения, за которыми следим. Пока запись есть, пуш уже запланирован,
         # так что пачка сообщений даёт одно уведомление.
         # Значение — что это: сообщение (True), звонок или его конец (ключи KINDS).
@@ -185,7 +197,11 @@ class Pusher:
 
     @property
     def enabled(self) -> bool:
-        return self.vapid is not None
+        return self.vapid is not None or self.fcm_send is not None
+
+    @property
+    def fcm_enabled(self) -> bool:
+        return self.fcm_send is not None
 
     @property
     def public_key(self) -> str | None:
@@ -228,7 +244,11 @@ class Pusher:
         """Послать пуш владельцу сейчас. Возвращает HTTP-статус пуш-сервиса,
         0 — до него не достучались, None — подписки нет."""
         sub = self.store.push_get(owner)
-        if sub is None or self.vapid is None:
+        if sub is None:
+            return None
+        if sub.endpoint.startswith(FCM_PREFIX):
+            return await self._deliver_fcm(owner, sub.endpoint, sub.auth, kind)
+        if self.vapid is None:
             return None
         endpoint = sub.endpoint
         host = urlsplit(endpoint).hostname
@@ -250,6 +270,25 @@ class Pusher:
             log.warning("push rejected by %s: HTTP %d", host, status)
         else:
             log.info("push via %s: HTTP %d", host, status)
+        return status
+
+    async def _deliver_fcm(self, owner: str, endpoint: str, key: str | None, kind: object) -> int | None:
+        if self.fcm_send is None or not key:
+            return None
+        mark = FCM_MARKS.get(kind, FCM_MARKS[True])
+        ttl = min(CALL_PUSH_TTL_SEC, self.cfg.push_ttl_sec) if kind == "call" else self.cfg.push_ttl_sec
+        try:
+            status = await asyncio.to_thread(self.fcm_send, endpoint[len(FCM_PREFIX) :], {"p": seal(mark, key)}, ttl)
+        except Exception as e:
+            log.warning("push to FCM failed: %s", type(e).__name__)
+            return 0
+        if status == 404:  # UNREGISTERED: приложение удалили или токен сменился
+            self.store.push_delete(owner, endpoint)
+            log.info("push via FCM: HTTP 404, subscription removed")
+        elif status >= 400:
+            log.warning("push rejected by FCM: HTTP %d", status)
+        else:
+            log.info("push via FCM: HTTP %d", status)
         return status
 
     async def close(self) -> None:
