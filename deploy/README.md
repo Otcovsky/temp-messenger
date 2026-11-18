@@ -133,3 +133,31 @@ TURN-сервер. Этого достаточно: каждый телефон 
 
 Внешний IP записан в `/etc/turnserver.conf` (`external-ip`). Если провайдер его сменит, запустите
 скрипт ещё раз.
+
+## Сайт-визитка на tempmessenger.tech
+
+Одна статическая страница (папка `site/`, без скриптов и счётчиков) с описанием и ссылками на чат
+и APK. Раньше корневой домен просто перенаправлял на `chat.`.
+
+Обычная выкладка (без sudo) — собирает `site/dist` и копирует в `~/temp-messenger-site`:
+
+```bash
+TM_APK=путь/к/app-release.apk bash deploy/deploy-site.sh   # без TM_APK — свежая сборка клиента
+```
+
+`site/build.sh` сам подставляет на страницу версию, размер и SHA-256 сертификата подписи APK
+(через `aapt2` и `apksigner` из Android SDK) и дату в `sitemap.xml`. APK на сервере всегда лежит
+как `/download/temp-messenger.apk`. Картинка для соцсетей `site/og.png` рисуется из `site/og-card.html`
+(команда — в самом файле).
+
+Разовая настройка (нужен sudo), после того как A-записи `@` и `www` указывают на сервер:
+
+```bash
+sudo cp /etc/nginx/sites-available/tempmessenger.tech /root/tempmessenger.tech.bak-$(date +%Y%m%d)
+sudo cp ~/temp-messenger/deploy/nginx-landing.conf /etc/nginx/sites-available/tempmessenger.tech
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d tempmessenger.tech -d www.tempmessenger.tech
+```
+
+Когда приложение появится в магазинах, кнопку APK в `site/index.html` (блок `#download` и подвал)
+заменить ссылками на магазины.
