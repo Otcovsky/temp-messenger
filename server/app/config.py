@@ -17,6 +17,10 @@ class Settings:
     mailbox_idle_ttl_sec: int = _int("TM_MAILBOX_IDLE_TTL_SEC", 30 * 24 * 3600)
     max_payload_bytes: int = _int("TM_MAX_PAYLOAD_BYTES", 64 * 1024)
     max_queue_per_mailbox: int = _int("TM_MAX_QUEUE_PER_MAILBOX", 1000)
+    # Потолок всей очереди недоставленных сообщений, в байтах шифротекста. Ящик заводит кто угодно,
+    # и без потолка можно слать себе сообщения, пока не кончится диск, — тогда ляжет весь сервер.
+    # Упёрлись — новые сообщения получают отказ server_full, а сервер живёт дальше.
+    max_queue_bytes_total: int = _int("TM_MAX_QUEUE_BYTES_TOTAL", 4 * 1024 * 1024 * 1024)
     max_recipients: int = _int("TM_MAX_RECIPIENTS", 256)
     max_mailboxes_per_conn: int = _int("TM_MAX_MAILBOXES_PER_CONN", 2000)
     # Токен-бакет на соединение: сколько команд в секунду и запас

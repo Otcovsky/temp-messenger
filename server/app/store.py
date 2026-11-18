@@ -29,6 +29,13 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS messages_expires ON messages(expires_at);
 
+-- Сколько байт шифротекста лежит в очереди всего. Счётчик ведут триггеры, поэтому он верен при
+-- любом удалении: ack, уборка по сроку, удаление ящика (каскадом). Строка одна, id = 1.
+CREATE TABLE IF NOT EXISTS queue_stats (
+    id          INTEGER PRIMARY KEY CHECK (id = 1),
+    bytes       INTEGER NOT NULL
+);
+
 -- Зашифрованные файлы. Сами байты лежат на диске, здесь — учёт.
 CREATE TABLE IF NOT EXISTS blobs (
     id          TEXT PRIMARY KEY,
@@ -94,6 +101,30 @@ class Store:
         if "p256dh" not in cols:  # база от версии с пустыми пушами
             self.db.execute("ALTER TABLE push_subs ADD COLUMN p256dh TEXT")
             self.db.execute("ALTER TABLE push_subs ADD COLUMN auth TEXT")
+        self._init_queue_stats()
+
+    def _init_queue_stats(self) -> None:
+        # Счётчик и триггеры создаются одной транзакцией: в базе прежней версии сообщения уже есть,
+        # и между подсчётом и появлением триггеров ничего не должно проскочить мимо счёта.
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            if self.db.execute("SELECT 1 FROM queue_stats WHERE id=1").fetchone() is None:
+                self.db.execute(
+                    "INSERT INTO queue_stats(id, bytes) "
+                    "SELECT 1, COALESCE(SUM(length(CAST(payload AS BLOB))), 0) FROM messages"
+                )
+            self.db.execute(
+                "CREATE TRIGGER IF NOT EXISTS messages_bytes_ins AFTER INSERT ON messages BEGIN "
+                "UPDATE queue_stats SET bytes = bytes + length(CAST(new.payload AS BLOB)) WHERE id=1; END"
+            )
+            self.db.execute(
+                "CREATE TRIGGER IF NOT EXISTS messages_bytes_del AFTER DELETE ON messages BEGIN "
+                "UPDATE queue_stats SET bytes = bytes - length(CAST(old.payload AS BLOB)) WHERE id=1; END"
+            )
+            self.db.execute("COMMIT")
+        except BaseException:
+            self.db.execute("ROLLBACK")
+            raise
 
     def close(self) -> None:
         self.db.close()
@@ -147,9 +178,17 @@ class Store:
     # --- сообщения -------------------------------------------------------
 
     def enqueue(
-        self, mailbox_id: str, msg_id: str, payload: str, ttl: int, max_queue: int, now: int | None = None
+        self,
+        mailbox_id: str,
+        msg_id: str,
+        payload: str,
+        ttl: int,
+        max_queue: int,
+        now: int | None = None,
+        max_total_bytes: int | None = None,
     ) -> str:
-        """Возвращает 'stored', 'duplicate', 'no_mailbox' или 'queue_full'."""
+        """Возвращает 'stored', 'duplicate', 'no_mailbox', 'queue_full' (полон ящик)
+        или 'server_full' (вся очередь сервера заняла max_total_bytes)."""
         now = now or int(time.time())
         if not self.mailbox_exists(mailbox_id):
             return "no_mailbox"
@@ -158,12 +197,18 @@ class Store:
         ).fetchone()
         if count >= max_queue:
             return "queue_full"
+        if max_total_bytes is not None and self.queue_bytes() + len(payload.encode()) > max_total_bytes:
+            return "server_full"
         cur = self.db.execute(
             "INSERT OR IGNORE INTO messages(mailbox_id, id, payload, created_at, expires_at) "
             "VALUES (?,?,?,?,?)",
             (mailbox_id, msg_id, payload, now, now + ttl),
         )
         return "stored" if cur.rowcount else "duplicate"
+
+    def queue_bytes(self) -> int:
+        """Сколько байт шифротекста сейчас в очереди (вместе с истёкшими, которых не убрала уборка)."""
+        return self.db.execute("SELECT bytes FROM queue_stats WHERE id=1").fetchone()[0]
 
     def pending(self, mailbox_id: str, limit: int = 500, now: int | None = None) -> list[StoredMessage]:
         # Истёкшие не отдаём, даже если уборка до них ещё не дошла: у сигналов звонка срок —

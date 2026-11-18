@@ -256,6 +256,19 @@ def create_app(
         finally:
             hub.drop(conn)
 
+    last_full_warning: float | None = None
+
+    def warn_server_full() -> None:
+        # Очередь упёрлась в потолок — скорее всего, кто-то её забивает. В журнал не чаще раза в минуту.
+        nonlocal last_full_warning
+        if last_full_warning is None or time.monotonic() - last_full_warning >= 60:
+            last_full_warning = time.monotonic()
+            log.warning(
+                "message queue is full (%d bytes, limit TM_MAX_QUEUE_BYTES_TOTAL=%d): new messages are refused",
+                app.state.store.queue_bytes(),
+                cfg.max_queue_bytes_total,
+            )
+
     async def handle(conn: Connection, frame: dict, store: Store, hub: Hub, pusher: Pusher) -> None:
         if not isinstance(frame, dict):
             raise ProtocolError("bad_frame")
@@ -322,7 +335,11 @@ def create_app(
                 if not isinstance(raw, str) or not MAILBOX_RE.match(raw):
                     failed.append({"to": raw, "reason": "bad_mailbox"})
                     continue
-                res = store.enqueue(raw, msg_id, payload, ttl, cfg.max_queue_per_mailbox, now)
+                res = store.enqueue(
+                    raw, msg_id, payload, ttl, cfg.max_queue_per_mailbox, now, cfg.max_queue_bytes_total
+                )
+                if res == "server_full":
+                    warn_server_full()
                 if res == "stored":
                     online = bool(hub.subs.get(raw))
                     await hub.push(raw, {"t": "msg", "id": msg_id, "mailbox": raw, "payload": payload, "ts": now})
