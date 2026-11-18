@@ -3,3 +3,5 @@
 *.png binary
 *.jpg binary
 *.ico binary
+# cmd.exe читает .bat с метками надёжно только с CRLF (client/android/gradlew.bat)
+*.bat text eol=crlf
