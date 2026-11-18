@@ -43,7 +43,8 @@ from .blobs import BlobFiles, add_blob_routes, cleanup_blobs
 from .config import Settings, settings as default_settings
 from .fcm import FCM_PREFIX, FcmSend, key_valid, token_valid
 from .push import KINDS, Pusher, PushSend, endpoint_allowed, keys_valid
-from .store import RegisterResult, Store
+from .quota import BlobLedger, SendBudget, ip_key
+from .store import RegisterResult, Store, message_cost
 
 log = logging.getLogger("temp_messenger")
 
@@ -106,6 +107,7 @@ class Connection:
     def __init__(self, ws: WebSocket, owner: str, cfg: Settings):
         self.ws = ws
         self.owner = owner
+        self.ip = ip_key(ws.client.host if ws.client else None)  # только для квот, нигде не пишется
         self.mailboxes: set[str] = set()
         self.bucket = TokenBucket(cfg.rate_per_sec, cfg.rate_burst)
         self.send_lock = asyncio.Lock()
@@ -161,6 +163,8 @@ def create_app(
         app.state.blobs = BlobFiles(cfg.blob_dir)
         app.state.hub = Hub()
         app.state.pusher = Pusher(app.state.store, cfg, push_send, fcm_send)
+        app.state.send_budget = SendBudget(cfg.queue_bytes_per_ip, cfg.message_ttl_sec, cfg.queue_refund_window_sec)
+        app.state.blob_ledger = BlobLedger(cfg.blob_quota_per_ip)
         task = asyncio.create_task(cleanup_loop(app.state.store, app.state.blobs))
         try:
             yield
@@ -175,7 +179,8 @@ def create_app(
         while True:
             try:
                 msgs, boxes = store.cleanup(cfg.mailbox_idle_ttl_sec)
-                files = cleanup_blobs(store, blobs)
+                files = cleanup_blobs(store, blobs, app.state.blob_ledger)
+                app.state.send_budget.prune()
                 if msgs or boxes or files:
                     log.info("cleanup: %d messages, %d mailboxes, %d files", msgs, boxes, files)
             except Exception:
@@ -330,10 +335,15 @@ def create_app(
             ttl = min(ttl, cfg.message_ttl_sec)
 
             now = int(time.time())
+            budget: SendBudget = app.state.send_budget
+            cost = message_cost(len(payload.encode()))
             failed = []
             for raw in dict.fromkeys(to):  # без дублей, порядок сохраняется
                 if not isinstance(raw, str) or not MAILBOX_RE.match(raw):
                     failed.append({"to": raw, "reason": "bad_mailbox"})
+                    continue
+                if not budget.allows(conn.ip, cost):
+                    failed.append({"to": raw, "reason": "quota"})
                     continue
                 res = store.enqueue(
                     raw, msg_id, payload, ttl, cfg.max_queue_per_mailbox, now, cfg.max_queue_bytes_total
@@ -341,6 +351,7 @@ def create_app(
                 if res == "server_full":
                     warn_server_full()
                 if res == "stored":
+                    budget.charge(conn.ip, (raw, msg_id), cost)
                     online = bool(hub.subs.get(raw))
                     await hub.push(raw, {"t": "msg", "id": msg_id, "mailbox": raw, "payload": payload, "ts": now})
                     if notify:
@@ -354,7 +365,10 @@ def create_app(
             ids = frame.get("ids")
             if not isinstance(ids, list) or len(ids) > MAX_ACK_IDS or not all(isinstance(i, str) for i in ids):
                 raise ProtocolError("bad_ack", mb)
-            store.ack(mb, conn.owner, ids)
+            if store.ack(mb, conn.owner, ids):
+                # Сообщения стёрты с диска — отправителю возвращается их стоимость (если ack быстрый)
+                for i in ids:
+                    app.state.send_budget.refund((mb, i))
 
         elif t == "push-sub" and "fcm" in frame:
             # Android-приложение: токен FCM и ключ, которым шифруется пометка в пуше

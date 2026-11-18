@@ -23,7 +23,7 @@ ssh "$HOST" "mkdir -p $REMOTE/client.new $REMOTE/server $REMOTE/data"
 tar -C client/dist -czf - . | ssh "$HOST" "tar -C $REMOTE/client.new -xzf - && rm -rf $REMOTE/client.old && { [ -d $REMOTE/client ] && mv $REMOTE/client $REMOTE/client.old || true; } && mv $REMOTE/client.new $REMOTE/client"
 
 echo "==> Выкладка сервера"
-tar --exclude=__pycache__ -czf - server/app server/requirements.txt deploy/temp-messenger.service deploy/nginx-site.conf deploy/nginx-add-blobs.sh deploy/calls-setup.sh | ssh "$HOST" "
+tar --exclude=__pycache__ -czf - server/app server/requirements.txt deploy/temp-messenger.service deploy/nginx-site.conf deploy/nginx-add-blobs.sh deploy/nginx-client-ip.sh deploy/calls-setup.sh | ssh "$HOST" "
   set -e
   cd $REMOTE
   rm -rf server/app

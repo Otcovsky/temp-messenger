@@ -21,6 +21,11 @@ class Settings:
     # и без потолка можно слать себе сообщения, пока не кончится диск, — тогда ляжет весь сервер.
     # Упёрлись — новые сообщения получают отказ server_full, а сервер живёт дальше.
     max_queue_bytes_total: int = _int("TM_MAX_QUEUE_BYTES_TOTAL", 4 * 1024 * 1024 * 1024)
+    # Сколько очереди может занять отправитель с одного IP (см. quota.SendBudget): ведро такого
+    # размера пополняется за срок жизни сообщения, а то, что получатель подтвердил в течение
+    # TM_QUEUE_REFUND_WINDOW_SEC, возвращается. Бот с одного адреса держит не больше ~2× от этого.
+    queue_bytes_per_ip: int = _int("TM_QUEUE_BYTES_PER_IP", 256 * 1024 * 1024)
+    queue_refund_window_sec: int = _int("TM_QUEUE_REFUND_WINDOW_SEC", 600)
     max_recipients: int = _int("TM_MAX_RECIPIENTS", 256)
     max_mailboxes_per_conn: int = _int("TM_MAX_MAILBOXES_PER_CONN", 2000)
     # Токен-бакет на соединение: сколько команд в секунду и запас
@@ -37,7 +42,12 @@ class Settings:
     blob_ttl_sec: int = _int("TM_BLOB_TTL_SEC", 7 * 24 * 3600)
     # Сколько места могут занять файлы одного ключа доступа и все вместе
     blob_quota_per_owner: int = _int("TM_BLOB_QUOTA_PER_OWNER", 256 * 1024 * 1024)
-    blob_quota_total: int = _int("TM_BLOB_QUOTA_TOTAL", 2 * 1024 * 1024 * 1024)
+    blob_quota_total: int = _int("TM_BLOB_QUOTA_TOTAL", 8 * 1024 * 1024 * 1024)
+    # То же для одного IP: ключ доступа бесплатен, а адрес — нет (см. quota.py)
+    blob_quota_per_ip: int = _int("TM_BLOB_QUOTA_PER_IP", 1024 * 1024 * 1024)
+    # В квотах файл весит не меньше этого: иначе миллион однобайтовых файлов уложился бы в квоту,
+    # но съел бы диск и inode
+    blob_min_cost: int = _int("TM_BLOB_MIN_COST", 64 * 1024)
     # Сколько ждать окончания начатой загрузки, прежде чем считать её брошенной
     blob_upload_timeout_sec: int = _int("TM_BLOB_UPLOAD_TIMEOUT_SEC", 3600)
     # Файл с версией (хешем коммита), его пишет deploy/deploy.sh; путь относительно рабочего каталога

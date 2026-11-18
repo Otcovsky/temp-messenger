@@ -66,6 +66,27 @@ CREATE TABLE IF NOT EXISTS meta (
 """
 
 
+# Сколько места на диске стоит сообщение в очереди: шифротекст плюс строка с ключами и индексами
+# (~250 байт), и не меньше 1 КиБ. Без накладных расходов поток крошечных сообщений забил бы диск,
+# почти не сдвинув счётчик; нижняя граница ограничивает и число строк (и учётных записей в памяти).
+ROW_OVERHEAD = 256
+MIN_PAYLOAD_COST = 768
+QUEUE_STATS_VERSION = "2"
+
+
+
+def message_cost(payload_bytes: int) -> int:
+    return max(payload_bytes, MIN_PAYLOAD_COST) + ROW_OVERHEAD
+
+
+def blob_cost(size: int, min_cost: int) -> int:
+    return max(size, min_cost)
+
+
+def _cost_sql(col: str) -> str:
+    return f"(max(length(CAST({col} AS BLOB)), {MIN_PAYLOAD_COST}) + {ROW_OVERHEAD})"
+
+
 @dataclass
 class StoredMessage:
     mailbox_id: str
@@ -106,21 +127,26 @@ class Store:
     def _init_queue_stats(self) -> None:
         # Счётчик и триггеры создаются одной транзакцией: в базе прежней версии сообщения уже есть,
         # и между подсчётом и появлением триггеров ничего не должно проскочить мимо счёта.
+        # Версия 2 считает не только шифротекст, но и место под строку (см. message_cost).
         self.db.execute("BEGIN IMMEDIATE")
         try:
-            if self.db.execute("SELECT 1 FROM queue_stats WHERE id=1").fetchone() is None:
+            if self.meta_get("queue_stats_v") != QUEUE_STATS_VERSION:
+                self.db.execute("DROP TRIGGER IF EXISTS messages_bytes_ins")
+                self.db.execute("DROP TRIGGER IF EXISTS messages_bytes_del")
+                self.db.execute("DELETE FROM queue_stats")
                 self.db.execute(
-                    "INSERT INTO queue_stats(id, bytes) "
-                    "SELECT 1, COALESCE(SUM(length(CAST(payload AS BLOB))), 0) FROM messages"
+                    f"INSERT INTO queue_stats(id, bytes) "
+                    f"SELECT 1, COALESCE(SUM({_cost_sql('payload')}), 0) FROM messages"
                 )
-            self.db.execute(
-                "CREATE TRIGGER IF NOT EXISTS messages_bytes_ins AFTER INSERT ON messages BEGIN "
-                "UPDATE queue_stats SET bytes = bytes + length(CAST(new.payload AS BLOB)) WHERE id=1; END"
-            )
-            self.db.execute(
-                "CREATE TRIGGER IF NOT EXISTS messages_bytes_del AFTER DELETE ON messages BEGIN "
-                "UPDATE queue_stats SET bytes = bytes - length(CAST(old.payload AS BLOB)) WHERE id=1; END"
-            )
+                self.db.execute(
+                    "CREATE TRIGGER messages_bytes_ins AFTER INSERT ON messages BEGIN "
+                    f"UPDATE queue_stats SET bytes = bytes + {_cost_sql('new.payload')} WHERE id=1; END"
+                )
+                self.db.execute(
+                    "CREATE TRIGGER messages_bytes_del AFTER DELETE ON messages BEGIN "
+                    f"UPDATE queue_stats SET bytes = bytes - {_cost_sql('old.payload')} WHERE id=1; END"
+                )
+                self.meta_set("queue_stats_v", QUEUE_STATS_VERSION)
             self.db.execute("COMMIT")
         except BaseException:
             self.db.execute("ROLLBACK")
@@ -197,7 +223,8 @@ class Store:
         ).fetchone()
         if count >= max_queue:
             return "queue_full"
-        if max_total_bytes is not None and self.queue_bytes() + len(payload.encode()) > max_total_bytes:
+        cost = message_cost(len(payload.encode()))
+        if max_total_bytes is not None and self.queue_bytes() + cost > max_total_bytes:
             return "server_full"
         cur = self.db.execute(
             "INSERT OR IGNORE INTO messages(mailbox_id, id, payload, created_at, expires_at) "
@@ -207,7 +234,7 @@ class Store:
         return "stored" if cur.rowcount else "duplicate"
 
     def queue_bytes(self) -> int:
-        """Сколько байт шифротекста сейчас в очереди (вместе с истёкшими, которых не убрала уборка)."""
+        """Сколько места занимает очередь по message_cost (вместе с истёкшими, которых не убрала уборка)."""
         return self.db.execute("SELECT bytes FROM queue_stats WHERE id=1").fetchone()[0]
 
     def pending(self, mailbox_id: str, limit: int = 500, now: int | None = None) -> list[StoredMessage]:
@@ -286,6 +313,7 @@ class Store:
         quota_owner: int,
         quota_total: int,
         now: int | None = None,
+        min_cost: int = 1,
     ) -> str:
         """Возвращает 'ok' (можно писать), 'exists' (этот же файл уже загружен),
         'busy' (загрузка уже идёт), 'conflict' (id занят другим) или 'quota'."""
@@ -300,12 +328,14 @@ class Store:
         if row is not None:  # истёк, но уборка ещё не дошла
             self.db.execute("DELETE FROM blobs WHERE id=?", (blob_id,))
         (used_owner,) = self.db.execute(
-            "SELECT COALESCE(SUM(size), 0) FROM blobs WHERE owner=? AND expires_at>?", (owner, now)
+            "SELECT COALESCE(SUM(max(size, ?)), 0) FROM blobs WHERE owner=? AND expires_at>?",
+            (min_cost, owner, now),
         ).fetchone()
         (used_total,) = self.db.execute(
-            "SELECT COALESCE(SUM(size), 0) FROM blobs WHERE expires_at>?", (now,)
+            "SELECT COALESCE(SUM(max(size, ?)), 0) FROM blobs WHERE expires_at>?", (min_cost, now)
         ).fetchone()
-        if used_owner + size > quota_owner or used_total + size > quota_total:
+        cost = blob_cost(size, min_cost)
+        if used_owner + cost > quota_owner or used_total + cost > quota_total:
             return "quota"
         self.db.execute(
             "INSERT INTO blobs(id, owner, size, remaining, complete, created_at, expires_at) "

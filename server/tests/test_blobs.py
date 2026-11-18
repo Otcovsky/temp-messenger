@@ -35,6 +35,7 @@ def cfg(tmp_path):
         max_blob_bytes=1000,
         blob_quota_per_owner=1500,
         blob_quota_total=2500,
+        blob_min_cost=1,
     )
 
 

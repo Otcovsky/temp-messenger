@@ -69,6 +69,16 @@ sudo bash ~/temp-messenger/deploy/nginx-add-blobs.sh
 соединений хватает с запасом даже за мобильным NAT. До 2026-11-18 было 100 — тогда, чтобы занять
 все места на сервере, хватало ~40 адресов, теперь нужно ~1000.
 
+Квоты на место (очередь сообщений, файлы) считает сам ретранслятор (`server/app/quota.py`),
+и ему нужен адрес клиента. Разовая правка — nginx передаёт его в `X-Forwarded-For`
+(uvicorn верит этому заголовку только от 127.0.0.1):
+
+```bash
+sudo bash ~/temp-messenger/deploy/nginx-client-ip.sh /etc/nginx/sites-available/chat.tempmessenger.tech
+```
+
+Без неё все приходят как 127.0.0.1, и квоты на IP молча не действуют (делить одну на всех нельзя).
+
 ## Больше 760 человек онлайн: разовая правка nginx.conf (нужен sudo)
 
 По умолчанию в `/etc/nginx/nginx.conf` стоит `worker_connections 768`. Каждое WebSocket-соединение

@@ -24,7 +24,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from starlette.requests import ClientDisconnect
 
 from .config import Settings
-from .store import Store
+from .quota import BlobLedger, ip_key
+from .store import Store, blob_cost
 
 log = logging.getLogger("temp_messenger")
 
@@ -61,10 +62,12 @@ class BlobFiles:
         return n
 
 
-def cleanup_blobs(store: Store, files: BlobFiles) -> int:
+def cleanup_blobs(store: Store, files: BlobFiles, ledger: BlobLedger | None = None) -> int:
     expired = store.blob_expired()
     for blob_id in expired:
         files.remove(blob_id)
+        if ledger is not None:
+            ledger.release(blob_id)
     return len(expired) + files.sweep(store.blob_ids())
 
 
@@ -95,6 +98,9 @@ def add_blob_routes(app: FastAPI, cfg: Settings) -> None:
     def files() -> BlobFiles:
         return app.state.blobs
 
+    def ledger() -> BlobLedger:
+        return app.state.blob_ledger
+
     @app.put("/blob/{blob_id}")
     async def put_blob(blob_id: str, request: Request):
         if not BLOB_ID_RE.match(blob_id):
@@ -115,8 +121,21 @@ def add_blob_routes(app: FastAPI, cfg: Settings) -> None:
         if owner is None:
             return _error(403, "auth_failed")
 
+        ip = ip_key(request.client.host if request.client else None)  # только для квоты, нигде не пишется
+        cost = blob_cost(size, cfg.blob_min_cost)
+        if not ledger().allows(ip, cost):
+            # Повтор уже загруженного файла квоту не тратит — пропускаем его к blob_reserve
+            if not store().blob_available(blob_id):
+                return _error(507, "quota")
         res = store().blob_reserve(
-            blob_id, owner, size, n, cfg.blob_upload_timeout_sec, cfg.blob_quota_per_owner, cfg.blob_quota_total
+            blob_id,
+            owner,
+            size,
+            n,
+            cfg.blob_upload_timeout_sec,
+            cfg.blob_quota_per_owner,
+            cfg.blob_quota_total,
+            min_cost=cfg.blob_min_cost,
         )
         if res == "exists":  # повтор после потерянного ответа — файл уже здесь
             return Response(status_code=200)
@@ -124,6 +143,7 @@ def add_blob_routes(app: FastAPI, cfg: Settings) -> None:
             return _error(507, "quota")
         if res != "ok":
             return _error(409, res)
+        ledger().charge(ip, blob_id, cost)
 
         part = files().part(blob_id)
         written = 0
@@ -140,6 +160,7 @@ def add_blob_routes(app: FastAPI, cfg: Settings) -> None:
         except (ClientDisconnect, ValueError, OSError) as e:
             store().blob_abort(blob_id)
             files().remove(blob_id)
+            ledger().release(blob_id)
             if isinstance(e, OSError):
                 log.warning("blob write failed: %s", e)
                 return _error(507, "storage")
@@ -160,4 +181,5 @@ def add_blob_routes(app: FastAPI, cfg: Settings) -> None:
     async def blob_done(blob_id: str):
         if BLOB_ID_RE.match(blob_id) and store().blob_done(blob_id):
             files().remove(blob_id)
+            ledger().release(blob_id)
         return Response(status_code=204)

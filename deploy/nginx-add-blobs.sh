@@ -26,6 +26,7 @@ block = """
     # тело передаётся ретранслятору потоком, без промежуточной записи на диск nginx.
     location /blob/ {
         proxy_pass http://127.0.0.1:8100;
+        proxy_set_header X-Forwarded-For $remote_addr;  # адрес клиента для квот (quota.py)
         client_max_body_size 27m;
         proxy_request_buffering off;
         proxy_buffering off;
