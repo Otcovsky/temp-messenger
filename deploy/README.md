@@ -53,6 +53,21 @@ journalctl --user -u temp-messenger -f
 sudo bash ~/temp-messenger/deploy/nginx-add-blobs.sh
 ```
 
+## Больше 760 человек онлайн: разовая правка nginx.conf (нужен sudo)
+
+По умолчанию в `/etc/nginx/nginx.conf` стоит `worker_connections 768`. Каждое WebSocket-соединение
+занимает в nginx два (клиент + ретранслятор), поэтому на двух ядрах сервер держит только ~760 человек
+онлайн, остальные получают 500 (проверено нагрузочным тестом, `loadtest/README.md`). Поднять:
+
+```bash
+sudo cp -p /etc/nginx/nginx.conf /root/nginx.conf.bak-$(date +%Y%m%d)
+sudo sed -i -e 's/^\tworker_connections 768;/\tworker_connections 4096;/' \
+  -e 's|^pid /run/nginx.pid;|pid /run/nginx.pid;\nworker_rlimit_nofile 8192;|' /etc/nginx/nginx.conf
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Ретранслятору лимит открытых файлов поднимает сам юнит (`LimitNOFILE=65536` в `temp-messenger.service`).
+
 ## Звонки: разовая настройка (нужен sudo)
 
 Звонку нужны две вещи, которых `deploy.sh` сделать не может:
