@@ -1,19 +1,48 @@
 import { Bell, BellOff, BellRing, Download, PhoneCall, RefreshCw, Smartphone, X } from 'lucide-react'
 import { useState } from 'react'
+import { APP_VERSION, DOWNLOAD_URL, dismissAppUpdate, useAppUpdate } from '../appUpdate'
 import { t } from '../i18n'
 import { isNativeApp } from '../platform'
 import { applyUpdate, isIos, isStandalone, promptInstall, usePwa } from '../pwa'
 import { disablePush, enablePush, testPush, usePush } from '../push'
 
-/** Плашка «Доступно обновление»: новая версия применяется только по нажатию. */
+const TOAST =
+  'fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] left-1/2 z-[60] flex max-w-[calc(100%-2rem)] -translate-x-1/2 animate-pop-in items-center gap-3 rounded-full bg-slate-900/90 py-1.5 pr-1.5 pl-4 text-sm text-white shadow-2xl backdrop-blur-xl dark:bg-white/15'
+
+/**
+ * Плашка «Доступно обновление»: новая версия применяется только по нажатию.
+ * На сайте и в PWA — новый service worker, в Android-приложении — новый APK с сайта.
+ */
 export function UpdateToast() {
   const { updateReady } = usePwa()
+  const { available } = useAppUpdate()
+  if (available) {
+    return (
+      <div role="status" className={TOAST}>
+        <Download className="size-4 shrink-0 text-violet-300" />
+        <span className="min-w-0 truncate">
+          {t(available.required ? 'appUpdate.required' : 'appUpdate.available', { version: available.name })}
+        </span>
+        {/* Ссылка вне приложения: Android откроет её в браузере, тот скачает APK */}
+        <a className="btn btn-sm btn-primary shrink-0 rounded-full" href={DOWNLOAD_URL}>
+          {t('appUpdate.download')}
+        </a>
+        {!available.required && (
+          <button
+            className="btn-icon size-8 shrink-0 text-white/70"
+            onClick={dismissAppUpdate}
+            title={t('appUpdate.later')}
+            aria-label={t('appUpdate.later')}
+          >
+            <X className="size-4" />
+          </button>
+        )}
+      </div>
+    )
+  }
   if (!updateReady) return null
   return (
-    <div
-      role="status"
-      className="fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] left-1/2 z-[60] flex max-w-[calc(100%-2rem)] -translate-x-1/2 animate-pop-in items-center gap-3 rounded-full bg-slate-900/90 py-1.5 pr-1.5 pl-4 text-sm text-white shadow-2xl backdrop-blur-xl dark:bg-white/15"
-    >
+    <div role="status" className={TOAST}>
       <RefreshCw className="size-4 shrink-0 text-violet-300" />
       <span className="truncate">{t('pwa.updateReady')}</span>
       <button className="btn btn-sm btn-primary rounded-full" onClick={applyUpdate}>
@@ -94,7 +123,9 @@ export function AppSection() {
     <>
       <h3 className="section-title">{t('pwa.section')}</h3>
       <div className="grid gap-3 rounded-2xl bg-slate-900/[0.03] p-4 text-sm leading-relaxed dark:bg-white/[0.04]">
-        {standalone ? (
+        {isNativeApp ? (
+          <p className="muted">{t('appUpdate.current', { version: APP_VERSION.name })}</p>
+        ) : standalone ? (
           <p className="muted">{t('pwa.standalone')}</p>
         ) : canInstall ? (
           <>

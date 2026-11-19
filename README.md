@@ -68,6 +68,11 @@ npm run apk        # → android/app/build/outputs/apk/release/app-release.apk
 ```
 
 Перед каждой новой версией увеличьте `versionCode` в `client/android/app/build.gradle`.
+Приложение само узнаёт о новой версии: при запуске и при возвращении на экран (не чаще раза в час)
+сверяет свой `versionCode` с `https://tempmessenger.tech/download/version.json` и показывает плашку
+«Вышла версия …» со ссылкой на APK (`client/src/appUpdate.ts`). Файл пишет `site/build.sh`, так что
+предложение обновиться появляется после выкладки сайта с новым APK. Проверка есть в APK новее 0.3.0;
+у кого 0.3.0 и раньше, тем нужно один раз обновиться вручную, с сайта.
 Значки: `node client/scripts/make-icons.mjs`. Пока без уведомлений (FCM — следующий этап).
 
 ## Выкладка

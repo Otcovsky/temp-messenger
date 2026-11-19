@@ -296,6 +296,11 @@ export const ru = {
   'calls.direct': 'Разрешить прямое соединение',
 
   // --- приложение (PWA) ---
+  'appUpdate.available': 'Вышла версия {version}',
+  'appUpdate.required': 'Нужно обновить до {version}',
+  'appUpdate.download': 'Скачать',
+  'appUpdate.later': 'Позже',
+  'appUpdate.current': 'Версия приложения: {version}.',
   'pwa.updateReady': 'Доступна новая версия',
   'pwa.update': 'Обновить',
   'pwa.install.title': 'Установите приложение',

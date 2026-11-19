@@ -290,6 +290,11 @@ export const en: Dict = {
   'calls.direct': 'Allow direct connection',
 
   // --- app (PWA) ---
+  'appUpdate.available': 'Version {version} is out',
+  'appUpdate.required': 'Update required: {version}',
+  'appUpdate.download': 'Download',
+  'appUpdate.later': 'Later',
+  'appUpdate.current': 'App version: {version}.',
   'pwa.updateReady': 'A new version is available',
   'pwa.update': 'Update',
   'pwa.install.title': 'Install the app',

@@ -57,9 +57,22 @@ function serviceWorker(): Plugin {
   }
 }
 
+/**
+ * Версия Android-приложения из android/app/build.gradle: по ней APK сверяется
+ * с download/version.json на сайте (src/appUpdate.ts).
+ */
+function apkVersion(): { code: number; name: string } {
+  const gradle = readFileSync(new URL('./android/app/build.gradle', import.meta.url), 'utf8')
+  const code = Number(/^\s*versionCode\s+(\d+)/m.exec(gradle)?.[1])
+  const name = /^\s*versionName\s+"([^"]+)"/m.exec(gradle)?.[1]
+  if (!Number.isInteger(code) || !name) throw new Error('В android/app/build.gradle не найдены versionCode/versionName')
+  return { code, name }
+}
+
 // В разработке WebSocket и файлы проксируются на локальный Python-сервер.
 export default defineConfig({
   plugins: [react(), tailwindcss(), serviceWorker()],
+  define: { __APK_VERSION__: JSON.stringify(apkVersion()) },
   server: {
     port: 5173,
     proxy: {

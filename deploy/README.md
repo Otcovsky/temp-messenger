@@ -149,7 +149,12 @@ TM_APK=путь/к/app-release.apk bash deploy/deploy-site.sh   # без TM_APK 
 
 `site/build.sh` сам подставляет на страницу версию, размер и SHA-256 сертификата подписи APK
 (через `aapt2` и `apksigner` из Android SDK) и дату в `sitemap.xml`. APK на сервере всегда лежит
-как `/download/temp-messenger.apk`. Картинка для соцсетей `site/og.png` рисуется из `site/og-card.html`
+как `/download/temp-messenger.apk`, рядом — `/download/version.json` (`versionCode`, `versionName`,
+`minVersionCode`): по нему Android-приложение предлагает обновиться. Если сервер изменился так, что
+старые приложения с ним не работают, выкладывайте сайт с `TM_APK_MIN_CODE=<versionCode>`: приложения
+старше этой версии покажут плашку «Нужно обновить» без кнопки «Позже». Чтобы nginx не кешировал
+`version.json` час, на живом сервере стоит вписать блок `location = /download/version.json` из
+`nginx-landing.conf` (без него проверка тоже работает, только с задержкой до часа). Картинка для соцсетей `site/og.png` рисуется из `site/og-card.html`
 (команда — в самом файле).
 
 Аналитика Google есть только на этом сайте (в чате её нет): контейнер Tag Manager `GTM-WCWTGS9G`,

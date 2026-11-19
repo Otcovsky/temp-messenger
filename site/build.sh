@@ -23,11 +23,19 @@ AAPT2="$(tool aapt2)"
 APKSIGNER="$(tool apksigner)"
 
 if [ -n "$AAPT2" ]; then
-  VERSION="$("$AAPT2" dump badging "$APK" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")"
+  BADGING="$("$AAPT2" dump badging "$APK")"
+  VERSION="$(echo "$BADGING" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")"
+  CODE="$(echo "$BADGING" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p")"
 else
   VERSION="$(sed -n 's/^ *versionName "\(.*\)"/\1/p' client/android/app/build.gradle)"
-  echo "Нет aapt2, версия взята из build.gradle: $VERSION" >&2
+  CODE="$(sed -n 's/^ *versionCode \([0-9]*\).*/\1/p' client/android/app/build.gradle)"
+  echo "Нет aapt2, версия взята из build.gradle: $VERSION ($CODE)" >&2
 fi
+[[ "$CODE" =~ ^[0-9]+$ ]] || { echo "Не удалось узнать versionCode APK" >&2; exit 1; }
+# Старше этой версии приложение просит обновиться без кнопки «Позже» — когда сервер
+# изменился несовместимо. По умолчанию 1: обновление предлагается, но не требуется.
+MIN_CODE="${TM_APK_MIN_CODE:-1}"
+[[ "$MIN_CODE" =~ ^[0-9]+$ && "$MIN_CODE" -le "$CODE" ]] || { echo "TM_APK_MIN_CODE должен быть числом не больше $CODE" >&2; exit 1; }
 BYTES="$(wc -c < "$APK" | tr -d ' ')"
 SIZE_EN="$(awk -v b="$BYTES" 'BEGIN { printf "%.1f MB", b / 1048576 }')"
 SIZE="$(echo "$SIZE_EN" | sed 's/\./,/; s/MB/МБ/')"
@@ -65,8 +73,11 @@ sed -e "s|__LASTMOD__|$(date -u +%F)|" site/sitemap.xml > "$OUT/sitemap.xml"
 cp site/404.html site/robots.txt site/og.png "$OUT/"
 cp client/public/favicon-32.png client/public/apple-touch-icon.png client/public/icon-192.png "$OUT/"
 cp "$APK" "$OUT/download/temp-messenger.apk"
+# Приложение сверяет с этим файлом свою версию (client/src/appUpdate.ts). Ссылки здесь нет
+# намеренно: адрес скачивания зашит в приложении, подменённый файл не уведёт на чужой APK.
+printf '{"versionCode":%s,"versionName":"%s","minVersionCode":%s}\n' "$CODE" "$VERSION" "$MIN_CODE" > "$OUT/download/version.json"
 
 if grep -qE '__(APK_[A-Z]+|LASTMOD|ANALYTICS|GA_ID)__' "$OUT"/index.html "$OUT"/en/index.html "$OUT"/sitemap.xml "$OUT"/*.js 2>/dev/null; then
   echo "Остались незаполненные метки" >&2; exit 1
 fi
-echo "==> site/dist готов: APK $VERSION, $SIZE${SHA:+, подпись ${SHA:0:8}…}, аналитика: ${GA_ID:-нет}"
+echo "==> site/dist готов: APK $VERSION (versionCode $CODE, минимум $MIN_CODE), $SIZE${SHA:+, подпись ${SHA:0:8}…}, аналитика: ${GA_ID:-нет}"
