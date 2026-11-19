@@ -137,7 +137,7 @@ TURN-сервер. Этого достаточно: каждый телефон 
 ## Сайт-визитка на tempmessenger.tech
 
 Статическая страница на двух языках (папка `site/`): русская — `/` (`site/index.html`), английская —
-`/en/` (`site/en/index.html`). Разметка и стили у них одинаковые, тексты правятся в обоих файлах.
+`/en` без слэша (`site/en/index.html`; старый адрес `/en/` навсегда перенаправляет на `/en`). Разметка и стили у них одинаковые, тексты правятся в обоих файлах.
 Страницы ссылаются друг на друга (`hreflang`, переключатель RU/EN), обе есть в `sitemap.xml`.
 Раньше корневой домен просто перенаправлял на `chat.`.
 
@@ -168,8 +168,8 @@ sudo nginx -t && sudo systemctl reload nginx
 sudo certbot --nginx -d tempmessenger.tech -d www.tempmessenger.tech
 ```
 
-Английской версии нужны блоки `location = /en` и `location = /en/` из `nginx-landing.conf`: без них
-nginx отдаёт на `/en/` ошибку 404. На живом сервере их вписывают в
+Английской версии нужны блоки `location = /en` (отдаёт страницу) и `location = /en/` (301 на `/en`)
+из `nginx-landing.conf`: без них nginx отдаёт на `/en` ошибку 404. На живом сервере их вписывают в
 `/etc/nginx/sites-available/tempmessenger.tech` вручную (рядом с `location = /download/...`), затем
 `sudo nginx -t && sudo systemctl reload nginx`.
 

@@ -4,14 +4,14 @@
     <loc>https://tempmessenger.tech/</loc>
     <lastmod>__LASTMOD__</lastmod>
     <xhtml:link rel="alternate" hreflang="ru" href="https://tempmessenger.tech/"/>
-    <xhtml:link rel="alternate" hreflang="en" href="https://tempmessenger.tech/en/"/>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://tempmessenger.tech/en/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://tempmessenger.tech/en"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://tempmessenger.tech/en"/>
   </url>
   <url>
-    <loc>https://tempmessenger.tech/en/</loc>
+    <loc>https://tempmessenger.tech/en</loc>
     <lastmod>__LASTMOD__</lastmod>
     <xhtml:link rel="alternate" hreflang="ru" href="https://tempmessenger.tech/"/>
-    <xhtml:link rel="alternate" hreflang="en" href="https://tempmessenger.tech/en/"/>
-    <xhtml:link rel="alternate" hreflang="x-default" href="https://tempmessenger.tech/en/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://tempmessenger.tech/en"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://tempmessenger.tech/en"/>
   </url>
 </urlset>
