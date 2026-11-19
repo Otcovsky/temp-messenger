@@ -1,18 +1,11 @@
 import { FileText, Plus, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { t } from '../i18n'
 import { isInlineMime } from './FileMessage'
 import { formatSize } from './format'
 
 /** Сколько файлов можно приложить к одному сообщению */
 export const MAX_ATTACHMENTS = 10
-
-const plural = (n: number, one: string, few: string, many: string) => {
-  const d = n % 10
-  const dd = n % 100
-  if (d === 1 && dd !== 11) return one
-  if (d >= 2 && d <= 4 && (dd < 12 || dd > 14)) return few
-  return many
-}
 
 /**
  * Файлы, выбранные для отправки, — над полем ввода. Пока они здесь, текст в поле станет
@@ -34,12 +27,12 @@ export function AttachmentTray({
     <div className="mb-2 animate-pop-in">
       <div className="mb-1.5 flex items-center gap-2 px-1.5 text-xs">
         <span className="muted flex-1 truncate">
-          {files.length === 1 ? files[0].name : `${files.length} ${plural(files.length, 'файл', 'файла', 'файлов')}`} ·{' '}
+          {files.length === 1 ? files[0].name : t('file.count', { n: files.length })} ·{' '}
           {formatSize(total)}
-          <span className="max-sm:hidden"> — напишите подпись или сразу отправьте</span>
+          <span className="max-sm:hidden">{t('file.captionHint')}</span>
         </span>
         <button type="button" className="font-semibold text-violet-600 dark:text-violet-400" onClick={onClear}>
-          Убрать
+          {t('file.clear')}
         </button>
       </div>
       <ul className="no-scrollbar flex gap-2 overflow-x-auto px-1 pt-1.5 pb-0.5">
@@ -50,7 +43,7 @@ export function AttachmentTray({
               type="button"
               className="absolute -top-1.5 -right-1.5 grid size-6 place-items-center rounded-full bg-slate-900/80 text-white shadow ring-2 ring-white transition active:scale-90 dark:ring-surface-dark"
               onClick={() => onRemove(i)}
-              aria-label={`Убрать ${f.name}`}
+              aria-label={t('file.remove', { name: f.name })}
             >
               <X className="size-3.5" strokeWidth={3} />
             </button>
@@ -62,8 +55,8 @@ export function AttachmentTray({
               type="button"
               className="grid size-18 place-items-center rounded-2xl border-2 border-dashed border-slate-300 text-slate-400 transition active:scale-95 dark:border-white/15 dark:text-slate-500"
               onClick={onAdd}
-              aria-label="Добавить ещё файл"
-              title="Добавить ещё"
+              aria-label={t('file.addMore')}
+              title={t('file.addMoreShort')}
             >
               <Plus className="size-6" />
             </button>
@@ -92,7 +85,7 @@ function Thumb({ file }: { file: File }) {
       </div>
     )
   }
-  const ext = file.name.includes('.') ? file.name.split('.').pop()!.slice(0, 5).toUpperCase() : 'ФАЙЛ'
+  const ext = file.name.includes('.') ? file.name.split('.').pop()!.slice(0, 5).toUpperCase() : t('file.noExt')
   return (
     <div
       className="flex size-18 flex-col items-center justify-center gap-0.5 rounded-2xl bg-brand-soft px-1 text-violet-600 dark:text-violet-300"

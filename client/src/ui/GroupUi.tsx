@@ -1,5 +1,6 @@
 import { Check, Loader2, Lock, LogOut, ShieldCheck, Trash2, UserMinus, UserPlus, Users } from 'lucide-react'
 import { useState } from 'react'
+import { t } from '../i18n'
 import { type GroupView, MAX_GROUP } from '../core/messenger'
 import type { Contact } from '../storage/db'
 import { Avatar } from './Avatar'
@@ -8,12 +9,7 @@ import { useLive, useMessenger } from './hooks'
 import { Modal } from './Modal'
 
 /** «3 участника», «5 участников» */
-export function membersCount(n: number): string {
-  const d = n % 10
-  const h = n % 100
-  const word = d === 1 && h !== 11 ? 'участник' : d >= 2 && d <= 4 && (h < 12 || h > 14) ? 'участника' : 'участников'
-  return `${n} ${word}`
-}
+export const membersCount = (n: number): string => t('group.members', { n })
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
@@ -87,10 +83,10 @@ export function CreateGroupDialog({ onClose, onCreated }: { onClose: () => void;
   }
 
   return (
-    <Modal title="Новая группа" onClose={onClose}>
+    <Modal title={t('group.new')} onClose={onClose}>
       {people?.length === 0 ? (
         <p className="muted pb-2 text-sm leading-relaxed">
-          В группу можно позвать только тех, с кем у вас уже есть чат. Сначала пригласите хотя бы одного собеседника.
+          {t('group.needContacts')}
         </p>
       ) : (
         <form
@@ -100,26 +96,25 @@ export function CreateGroupDialog({ onClose, onCreated }: { onClose: () => void;
           }}
         >
           <label className="section-title block" htmlFor="group-name">
-            Название
+            {t('group.name')}
           </label>
           <input
             id="group-name"
             className="field mb-5"
             value={name}
             maxLength={64}
-            placeholder="Например, «Семья»"
+            placeholder={t('group.namePlaceholder')}
             autoFocus
             onChange={(e) => setName(e.target.value)}
           />
-          <h3 className="section-title">Участники</h3>
+          <h3 className="section-title">{t('group.membersTitle')}</h3>
           <PeoplePicker people={people ?? []} picked={picked} onToggle={toggle} />
           <p className="muted mt-4 mb-4 text-sm leading-relaxed">
-            Незнакомых между собой участников вы представите друг другу автоматически: у каждой пары будет свой
-            шифрованный канал. До {MAX_GROUP} человек.
+            {t('group.pairwise', { max: MAX_GROUP })}
           </p>
           {error && <p className="note note-error mb-4">{error}</p>}
           <button className="btn btn-primary w-full" disabled={busy || !name.trim() || picked.size === 0}>
-            {busy ? <Loader2 className="size-5 animate-spin" /> : <Users className="size-5" />} Создать группу
+            {busy ? <Loader2 className="size-5 animate-spin" /> : <Users className="size-5" />} {t('group.create')}
           </button>
         </form>
       )}
@@ -137,11 +132,11 @@ function MemberDetails({ member, contactId }: { member: GroupView['members'][num
     <div className="mt-1 mb-2 ml-13 rounded-2xl bg-brand-soft p-3 text-sm">
       <ContactNameForm className="mb-3" contactId={contactId} name={member.name} selfName={member.selfName} />
       <p className="mb-1 flex items-center gap-1.5 font-medium">
-        <ShieldCheck className="size-4" /> Код безопасности
+        <ShieldCheck className="size-4" /> {t('common.safetyCode')}
       </p>
       <p className="font-mono tracking-wide [word-spacing:0.3em]">{safety ?? '…'}</p>
       <p className="muted mt-1.5 text-xs leading-relaxed">
-        Сверьте его с этим человеком лично или по телефону: так вы убедитесь, что вас познакомили без подмены.
+        {t('group.memberSafetyHint')}
       </p>
     </div>
   )
@@ -172,19 +167,18 @@ export function GroupInfoDialog({ group, onClose, onDeleted }: { group: GroupVie
   const candidates = (people ?? []).filter((p) => !group.members.some((x) => x.ik === p.ik))
 
   return (
-    <Modal title="О группе" onClose={onClose}>
+    <Modal title={t('group.about')} onClose={onClose}>
       <div className="mb-6 flex flex-col items-center gap-2 text-center">
         <Avatar name={group.title} size="xl" />
         <p className="mt-1 text-xl font-bold">{group.title}</p>
         <p className="flex items-center gap-1.5 text-sm text-emerald-600 dark:text-emerald-400">
-          <Lock className="size-3.5" /> сквозное шифрование · {membersCount(group.members.length + (active ? 1 : 0))}
+          <Lock className="size-3.5" /> {t('common.e2e')} · {membersCount(group.members.length + (active ? 1 : 0))}
         </p>
       </div>
 
       {group.left && (
         <p className="note note-warn mb-5">
-          {group.left === 'removed' ? 'Создатель удалил вас из этой группы.' : 'Вы вышли из этой группы.'} Переписка
-          осталась только у вас.
+          {group.left === 'removed' ? t('group.removedYou') : t('group.youLeft')} {t('group.historyStays')}
         </p>
       )}
 
@@ -197,27 +191,27 @@ export function GroupInfoDialog({ group, onClose, onDeleted }: { group: GroupVie
           }}
         >
           <label className="section-title block" htmlFor="group-title">
-            Название (видно всем участникам)
+            {t('group.titleLabel')}
           </label>
           <div className="flex gap-2">
             <input id="group-title" className="field" value={name ?? group.title} maxLength={64} onChange={(e) => setName(e.target.value)} />
             <button className="btn btn-soft shrink-0" disabled={name === null || !name.trim() || name.trim() === group.title}>
-              Сохранить
+              {t('common.save')}
             </button>
           </div>
         </form>
       )}
 
-      <h3 className="section-title">Участники</h3>
+      <h3 className="section-title">{t('group.membersTitle')}</h3>
       {group.members.some((x) => x.contactId) && (
-        <p className="muted -mt-1 mb-2 text-xs">Нажмите на участника, чтобы подписать его по-своему или сверить код.</p>
+        <p className="muted -mt-1 mb-2 text-xs">{t('group.tapMember')}</p>
       )}
       <ul className="-mx-2 mb-4 grid gap-0.5">
         {active && (
           <li className="flex items-center gap-3 px-2 py-2">
             <Avatar name={m.profile!.name} size="sm" />
             <span className="min-w-0 flex-1 truncate font-medium">{m.profile!.name}</span>
-            <small className="muted shrink-0 text-xs">{group.amAdmin ? 'вы, создатель' : 'вы'}</small>
+            <small className="muted shrink-0 text-xs">{group.amAdmin ? t('group.youCreator') : t('group.you')}</small>
           </li>
         )}
         {group.members.map((x) => (
@@ -233,15 +227,15 @@ export function GroupInfoDialog({ group, onClose, onDeleted }: { group: GroupVie
                 <Avatar name={x.name} size="sm" />
                 <span className="min-w-0 flex-1 truncate font-medium">{x.name}</span>
                 <small className={`shrink-0 text-xs ${x.contactId ? 'muted' : 'text-amber-600 dark:text-amber-400'}`}>
-                  {!x.contactId ? 'подключается…' : x.admin ? 'создатель' : ''}
+                  {!x.contactId ? t('group.connecting') : x.admin ? t('group.creator') : ''}
                 </small>
               </button>
               {group.amAdmin && active && (
                 <button
                   className="btn-icon size-9 shrink-0"
                   onClick={() => void run(() => m.removeGroupMember(group.id, x.ik))}
-                  aria-label={`Удалить из группы: ${x.name}`}
-                  title="Удалить из группы"
+                  aria-label={t('group.removeMemberNamed', { name: x.name })}
+                  title={t('group.removeMember')}
                 >
                   <UserMinus className="size-4.5" />
                 </button>
@@ -254,7 +248,7 @@ export function GroupInfoDialog({ group, onClose, onDeleted }: { group: GroupVie
 
       {group.amAdmin && active && !adding && candidates.length > 0 && (
         <button className="btn btn-soft mb-4 w-full" onClick={() => setAdding(true)}>
-          <UserPlus className="size-5" /> Добавить участников
+          <UserPlus className="size-5" /> {t('group.addMembers')}
         </button>
       )}
       {adding && (
@@ -262,14 +256,14 @@ export function GroupInfoDialog({ group, onClose, onDeleted }: { group: GroupVie
           <PeoplePicker people={candidates} picked={picked} onToggle={toggle} />
           <div className="mt-3 grid grid-cols-2 gap-2.5">
             <button className="btn btn-soft" onClick={() => setAdding(false)}>
-              Отмена
+              {t('common.cancel')}
             </button>
             <button
               className="btn btn-primary"
               disabled={picked.size === 0}
               onClick={() => void run(() => m.addGroupMembers(group.id, [...picked])).then(() => setAdding(false))}
             >
-              Добавить
+              {t('common.add')}
             </button>
           </div>
         </div>
@@ -277,9 +271,7 @@ export function GroupInfoDialog({ group, onClose, onDeleted }: { group: GroupVie
 
       {active && (
         <p className="muted mb-5 text-sm leading-relaxed">
-          Каждое сообщение шифруется отдельно для каждого участника. Новые участники не видят прежнюю переписку. Тот, у
-          кого ещё «подключается», пока не получает ваши сообщения. Менять состав и удалять группу может только её
-          создатель.
+          {t('group.explain')}
         </p>
       )}
       {error && <p className="note note-error mb-4">{error}</p>}
@@ -287,20 +279,20 @@ export function GroupInfoDialog({ group, onClose, onDeleted }: { group: GroupVie
       {!confirm ? (
         <button className="btn btn-danger w-full" onClick={() => setConfirm(true)}>
           {owner ? <Trash2 className="size-5" /> : <LogOut className="size-5" />}{' '}
-          {owner ? 'Удалить группу…' : active ? 'Выйти из группы…' : 'Удалить переписку…'}
+          {owner ? t('group.delete') : active ? t('group.leave') : t('group.deleteHistory')}
         </button>
       ) : (
         <>
           <p className="mb-3 text-sm">
             {owner
-              ? 'Группа и вся её переписка удалятся у всех участников. Отменить это нельзя.'
+              ? t('group.deleteConfirm')
               : active
-                ? 'Переписка удалится у вас, участники увидят, что вы вышли.'
-                : 'Переписка этой группы удалится с этого устройства.'}
+                ? t('group.leaveConfirm')
+                : t('group.deleteHistoryConfirm')}
           </p>
           <div className="grid grid-cols-2 gap-2.5">
             <button className="btn btn-soft" onClick={() => setConfirm(false)}>
-              Отмена
+              {t('common.cancel')}
             </button>
             <button
               className="btn btn-danger-solid"
@@ -312,7 +304,7 @@ export function GroupInfoDialog({ group, onClose, onDeleted }: { group: GroupVie
                 })
               }
             >
-              {owner ? 'Удалить у всех' : active ? 'Выйти' : 'Удалить'}
+              {owner ? t('group.deleteForAll') : active ? t('group.leaveShort') : t('common.delete')}
             </button>
           </div>
         </>

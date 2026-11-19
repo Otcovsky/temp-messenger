@@ -12,6 +12,7 @@ import {
   toggleMute,
   useCall,
 } from '../core/calls'
+import { t } from '../i18n'
 import { Avatar } from './Avatar'
 
 function clock(seconds: number): string {
@@ -30,11 +31,11 @@ function Timer({ since }: { since: number }) {
 }
 
 function statusLine(call: CallState) {
-  if (call.phase === 'ended') return call.note ?? 'Звонок завершён'
-  if (call.phase === 'incoming') return call.video ? 'Входящий видеозвонок' : 'Входящий звонок'
-  if (call.phase === 'outgoing') return call.video ? 'Видеовызов…' : 'Вызов…'
-  if (call.phase === 'connecting') return 'Соединение…'
-  if (call.unstable) return 'Связь прерывается…'
+  if (call.phase === 'ended') return call.note ? t(call.note) : t('call.ended')
+  if (call.phase === 'incoming') return call.video ? t('call.incomingVideo') : t('call.incoming')
+  if (call.phase === 'outgoing') return call.video ? t('call.callingVideo') : t('call.calling')
+  if (call.phase === 'connecting') return t('call.connecting')
+  if (call.unstable) return t('call.unstable')
   return <Timer since={call.startedAt ?? Date.now()} />
 }
 
@@ -67,12 +68,12 @@ export function CallOverlay() {
   return (
     <div
       role="dialog"
-      aria-label={`Звонок: ${call.name}`}
+      aria-label={t('call.dialog', { name: call.name })}
       className={`fixed inset-0 z-[70] flex flex-col items-center justify-between px-6 pt-[max(4rem,env(safe-area-inset-top))] pb-[max(3rem,env(safe-area-inset-bottom))] text-center ${remoteVideo ? 'bg-black' : 'bg-aurora'}`}
     >
       {remoteVideo && (
         <>
-          <Stream stream={remote} label={`Видео: ${call.name}`} className="absolute inset-0 size-full object-contain" />
+          <Stream stream={remote} label={t('call.video', { name: call.name })} className="absolute inset-0 size-full object-contain" />
           <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-black/60 to-transparent" />
           <div className="pointer-events-none absolute inset-x-0 bottom-0 h-56 bg-gradient-to-t from-black/70 to-transparent" />
         </>
@@ -80,7 +81,7 @@ export function CallOverlay() {
       {call.camera && local && !ended && (
         <Stream
           stream={local}
-          label="Моя камера"
+          label={t('call.myCamera')}
           className={`absolute top-[max(1rem,env(safe-area-inset-top))] right-4 z-10 aspect-[3/4] w-24 rounded-2xl bg-black object-cover shadow-2xl ring-1 ring-white/20 sm:w-32 ${call.front ? '-scale-x-100' : ''}`}
         />
       )}
@@ -100,26 +101,26 @@ export function CallOverlay() {
       <div className="relative flex items-start justify-center gap-x-3 sm:gap-x-6">
         {call.phase === 'incoming' ? (
           <>
-            <CallButton label="Отклонить" caption={caption}>
-              <button className={`${round} bg-rose-500 shadow-rose-500/30`} onClick={hangup} aria-label="Отклонить">
+            <CallButton label={t('call.decline')} caption={caption}>
+              <button className={`${round} bg-rose-500 shadow-rose-500/30`} onClick={hangup} aria-label={t('call.decline')}>
                 <PhoneOff className="size-7" />
               </button>
             </CallButton>
-            <CallButton label={call.video ? 'Без видео' : 'Ответить'} caption={caption}>
+            <CallButton label={call.video ? t('call.noVideo') : t('call.answer')} caption={caption}>
               <button
                 className={`${round} bg-emerald-500 shadow-emerald-500/30`}
                 onClick={() => void acceptCall()}
-                aria-label={call.video ? 'Ответить без видео' : 'Ответить'}
+                aria-label={call.video ? t('call.answerNoVideo') : t('call.answer')}
               >
                 <Phone className="size-7" />
               </button>
             </CallButton>
             {call.video && (
-              <CallButton label="С видео" caption={caption}>
+              <CallButton label={t('call.withVideo')} caption={caption}>
                 <button
                   className={`${round} bg-emerald-500 shadow-emerald-500/30`}
                   onClick={() => void acceptCall(true)}
-                  aria-label="Ответить с видео"
+                  aria-label={t('call.answerVideo')}
                 >
                   <Video className="size-7" />
                 </button>
@@ -129,11 +130,11 @@ export function CallOverlay() {
         ) : (
           <>
             {talking && (
-              <CallButton label={call.muted ? 'Микрофон выключен' : 'Микрофон'} caption={caption}>
+              <CallButton label={call.muted ? t('call.micOff') : t('call.mic')} caption={caption}>
                 <button
                   className={`${round} ${call.muted ? 'bg-white text-slate-900!' : plain}`}
                   onClick={toggleMute}
-                  aria-label={call.muted ? 'Включить микрофон' : 'Выключить микрофон'}
+                  aria-label={call.muted ? t('call.micOn') : t('call.micMute')}
                   aria-pressed={call.muted}
                 >
                   {call.muted ? <MicOff className="size-7" /> : <Mic className="size-7" />}
@@ -141,11 +142,11 @@ export function CallOverlay() {
               </CallButton>
             )}
             {talking && call.canVideo && (
-              <CallButton label={call.camera ? 'Камера' : 'Камера выключена'} caption={caption}>
+              <CallButton label={call.camera ? t('call.cam') : t('call.camOff')} caption={caption}>
                 <button
                   className={`${round} ${call.camera ? plain : 'bg-white text-slate-900!'}`}
                   onClick={() => void toggleCamera()}
-                  aria-label={call.camera ? 'Выключить камеру' : 'Включить камеру'}
+                  aria-label={call.camera ? t('call.camMute') : t('call.camOn')}
                   aria-pressed={call.camera}
                 >
                   {call.camera ? <Video className="size-7" /> : <VideoOff className="size-7" />}
@@ -153,17 +154,17 @@ export function CallOverlay() {
               </CallButton>
             )}
             {talking && call.camera && touch && (
-              <CallButton label="Сменить" caption={caption}>
-                <button className={`${round} ${plain}`} onClick={() => void switchCamera()} aria-label="Сменить камеру">
+              <CallButton label={t('call.switch')} caption={caption}>
+                <button className={`${round} ${plain}`} onClick={() => void switchCamera()} aria-label={t('call.switchCamera')}>
                   <SwitchCamera className="size-7" />
                 </button>
               </CallButton>
             )}
-            <CallButton label={ended ? 'Закрыть' : 'Завершить'} caption={caption}>
+            <CallButton label={ended ? t('common.close') : t('call.hangup')} caption={caption}>
               <button
                 className={`${round} ${ended ? 'bg-slate-500' : 'bg-rose-500 shadow-rose-500/30'}`}
                 onClick={hangup}
-                aria-label={ended ? 'Закрыть' : 'Завершить звонок'}
+                aria-label={ended ? t('common.close') : t('call.hangupLong')}
               >
                 <PhoneOff className="size-7" />
               </button>
@@ -193,14 +194,13 @@ export function CallsSection() {
   }
   return (
     <>
-      <h3 className="section-title mt-6">Звонки</h3>
+      <h3 className="section-title mt-6">{t('calls.title')}</h3>
       <div className="grid gap-3 rounded-2xl bg-slate-900/[0.03] p-4 text-sm leading-relaxed dark:bg-white/[0.04]">
         <p className="muted">
-          Звонки шифруются между устройствами. По умолчанию звук и видео идут через сервер, чтобы собеседник не видел
-          ваш IP-адрес. Напрямую качество видео заметно лучше, но адрес станет виден тому, с кем вы говорите.
+          {t('calls.explain')}
         </p>
         <label className="flex cursor-pointer items-center justify-between gap-3">
-          <span className="font-medium">Разрешить прямое соединение</span>
+          <span className="font-medium">{t('calls.direct')}</span>
           <input type="checkbox" className="size-5 accent-violet-600" checked={direct} onChange={toggle} />
         </label>
       </div>

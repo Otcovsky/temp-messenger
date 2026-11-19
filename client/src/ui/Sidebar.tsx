@@ -1,9 +1,12 @@
 import { ChevronRight, KeyRound, MessageCirclePlus, ScanQrCode, Trash2, UserPlus, Users } from 'lucide-react'
 import { useState } from 'react'
+import { conversationPreview } from '../core/messenger'
+import { t } from '../i18n'
 import { Avatar } from './Avatar'
 import { CallsSection } from './CallUi'
 import { CreateGroupDialog } from './GroupUi'
 import { CreateInviteDialog, JoinDialog } from './InviteDialogs'
+import { LanguagePicker } from './LanguagePicker'
 import { useLive, useMessenger } from './hooks'
 import { Modal } from './Modal'
 import { AppSection, InstallBanner, NotificationsSection } from './PwaUi'
@@ -12,9 +15,9 @@ import { formatTime } from './format'
 export { Avatar }
 
 const STATUS = {
-  online: { text: 'в сети', dot: 'bg-emerald-500' },
-  connecting: { text: 'подключение…', dot: 'bg-amber-400 animate-pulse' },
-  offline: { text: 'нет связи', dot: 'bg-rose-500' },
+  online: { text: 'status.online', dot: 'bg-emerald-500' },
+  connecting: { text: 'status.connecting', dot: 'bg-amber-400 animate-pulse' },
+  offline: { text: 'status.offline', dot: 'bg-rose-500' },
 } as const
 
 export function Sidebar({
@@ -43,14 +46,14 @@ export function Sidebar({
             <h1 className="text-[28px] leading-tight font-extrabold tracking-tight">Temp Messenger</h1>
             <p className="muted flex items-center gap-1.5 text-[13px]">
               <span className={`size-2 rounded-full ${status.dot}`} />
-              {status.text}
+              {t(status.text)}
             </p>
           </div>
           <button
             className="rounded-full p-0.5 ring-2 ring-white/70 transition active:scale-95 dark:ring-white/10"
             onClick={() => setDialog('settings')}
-            title="Настройки"
-            aria-label="Настройки"
+            title={t('sidebar.settings')}
+            aria-label={t('sidebar.settings')}
           >
             <Avatar name={m.profile!.name} size="sm" />
           </button>
@@ -77,7 +80,7 @@ export function Sidebar({
                   <Avatar name={c.title} />
                   {c.kind === 'group' && (
                     <span className="absolute -right-0.5 -bottom-0.5 grid size-5.5 place-items-center rounded-full bg-white text-violet-600 shadow ring-1 ring-slate-200 dark:bg-surface-2-dark dark:text-violet-300 dark:ring-white/10">
-                      <Users className="size-3.5" aria-label="Группа" />
+                      <Users className="size-3.5" aria-label={t('common.group')} />
                     </span>
                   )}
                 </span>
@@ -89,7 +92,7 @@ export function Sidebar({
                     </small>
                   </span>
                   <span className="flex items-center gap-2">
-                    <span className="muted flex-1 truncate text-sm">{c.lastText || 'Нет сообщений'}</span>
+                    <span className="muted flex-1 truncate text-sm">{conversationPreview(c) || t('sidebar.noMessages')}</span>
                     {c.unread > 0 && (
                       <span className="grid h-5.5 min-w-5.5 place-items-center rounded-full bg-brand px-1.5 text-xs font-bold text-white shadow-md shadow-violet-500/30">
                         {c.unread}
@@ -107,8 +110,8 @@ export function Sidebar({
       <button
         className="absolute right-5 bottom-[max(1.25rem,env(safe-area-inset-bottom))] grid size-15 place-items-center rounded-[22px] bg-brand text-white shadow-xl shadow-violet-500/40 transition hover:brightness-110 active:scale-90"
         onClick={() => setDialog('new')}
-        aria-label="Новый чат"
-        title="Новый чат"
+        aria-label={t('sidebar.newChat')}
+        title={t('sidebar.newChat')}
       >
         <MessageCirclePlus className="size-7" />
       </button>
@@ -146,16 +149,16 @@ function EmptyList({ onInvite, onJoin }: { onInvite: () => void; onJoin: () => v
           <MessageCirclePlus className="size-11" strokeWidth={1.75} />
         </div>
       </div>
-      <p className="text-lg font-bold">Пока нет чатов</p>
+      <p className="text-lg font-bold">{t('sidebar.empty.title')}</p>
       <p className="muted mt-1 mb-6 max-w-xs text-sm leading-relaxed">
-        Пригласите собеседника ссылкой или QR-кодом — или присоединитесь по его приглашению.
+        {t('sidebar.empty.text')}
       </p>
       <div className="grid w-full max-w-xs gap-2.5">
         <button className="btn btn-primary" onClick={onInvite}>
-          <UserPlus className="size-5" /> Пригласить
+          <UserPlus className="size-5" /> {t('sidebar.invite')}
         </button>
         <button className="btn btn-soft" onClick={onJoin}>
-          <ScanQrCode className="size-5" /> Присоединиться
+          <ScanQrCode className="size-5" /> {t('sidebar.join')}
         </button>
       </div>
     </div>
@@ -174,25 +177,25 @@ function NewChatDialog({
   onGroup: () => void
 }) {
   return (
-    <Modal title="Новый чат" onClose={onClose}>
+    <Modal title={t('sidebar.newChat')} onClose={onClose}>
       <div className="grid gap-2.5">
         <ChoiceRow
           icon={<UserPlus className="size-6" />}
-          title="Пригласить собеседника"
-          text="Одноразовая ссылка или QR-код"
+          title={t('newChat.invite.title')}
+          text={t('newChat.invite.text')}
           onClick={onInvite}
           accent
         />
         <ChoiceRow
           icon={<ScanQrCode className="size-6" />}
-          title="Присоединиться"
-          text="По ссылке или QR-коду собеседника"
+          title={t('newChat.join.title')}
+          text={t('newChat.join.text')}
           onClick={onJoin}
         />
         <ChoiceRow
           icon={<Users className="size-6" />}
-          title="Новая группа"
-          text="Общий чат с несколькими собеседниками"
+          title={t('newChat.group.title')}
+          text={t('newChat.group.text')}
           onClick={onGroup}
         />
       </div>
@@ -244,44 +247,52 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Modal title="Настройки" onClose={onClose}>
+    <Modal title={t('settings.title')} onClose={onClose}>
       <div className="mb-5 flex items-center gap-4 rounded-3xl bg-brand-soft p-4">
         <Avatar name={m.profile!.name} size="lg" />
         <div className="min-w-0">
           <p className="truncate text-lg font-bold">{m.profile!.name}</p>
           <p className="muted flex items-center gap-1.5 text-sm">
-            <KeyRound className="size-3.5" /> ключи только на этом устройстве
+            <KeyRound className="size-3.5" /> {t('settings.keysHere')}
           </p>
         </div>
       </div>
       <p className="muted mb-6 text-sm leading-relaxed">
-        Все данные хранятся только в этом браузере. На сервере — лишь зашифрованные сообщения, которые ещё не забрал
-        получатель (не дольше 7 дней).
+        {t('settings.storage')}
       </p>
 
+      <LanguageSection />
       <AppSection />
       <NotificationsSection />
       <CallsSection />
 
-      <h3 className="section-title mt-6">Удалить всё</h3>
+      <h3 className="section-title mt-6">{t('settings.wipe.title')}</h3>
       <p className="muted mb-3 text-sm leading-relaxed">
-        Собеседники получат уведомление, что чат закрыт. Ключи, контакты и переписка будут стёрты без возможности
-        восстановления.
+        {t('settings.wipe.text')}
       </p>
       {!confirm ? (
         <button className="btn btn-danger w-full" onClick={() => setConfirm(true)}>
-          <Trash2 className="size-5" /> Удалить всё…
+          <Trash2 className="size-5" /> {t('settings.wipe.button')}
         </button>
       ) : (
         <div className="grid grid-cols-2 gap-2.5">
           <button className="btn btn-soft" onClick={() => setConfirm(false)} disabled={busy}>
-            Отмена
+            {t('common.cancel')}
           </button>
           <button className="btn btn-danger-solid" onClick={wipe} disabled={busy}>
-            {busy ? 'Удаляю…' : 'Да, удалить'}
+            {busy ? t('settings.wipe.busy') : t('settings.wipe.confirm')}
           </button>
         </div>
       )}
     </Modal>
+  )
+}
+
+function LanguageSection() {
+  return (
+    <>
+      <h3 className="section-title">{t('settings.language')}</h3>
+      <LanguagePicker className="mb-6" />
+    </>
   )
 }

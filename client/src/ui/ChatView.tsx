@@ -19,12 +19,13 @@ import {
 } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { startCall } from '../core/calls'
-import { MAX_FILE } from '../core/messenger'
+import { MAX_FILE, messageLabel } from '../core/messenger'
+import { t } from '../i18n'
 import type { Message } from '../storage/db'
 import { AttachmentTray, MAX_ATTACHMENTS } from './AttachmentTray'
 import { Avatar } from './Avatar'
 import { FileCard, FileMessage, MediaTile, isInlineImage, isInlineMime } from './FileMessage'
-import { formatDay } from './format'
+import { formatClock, formatDay } from './format'
 import { ContactNameForm } from './ContactName'
 import { GroupInfoDialog, membersCount } from './GroupUi'
 import { useLive, useMessenger } from './hooks'
@@ -116,13 +117,13 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
     const ok: File[] = []
     const bad: string[] = []
     for (const f of files) {
-      if (f.size > MAX_FILE) bad.push(`«${f.name}» больше ${MAX_FILE / 1024 / 1024} МБ`)
-      else if (!f.size) bad.push(`«${f.name}» — пустой файл`)
+      if (f.size > MAX_FILE) bad.push(t('chat.fileTooBig', { name: f.name, mb: MAX_FILE / 1024 / 1024 }))
+      else if (!f.size) bad.push(t('chat.fileEmpty', { name: f.name }))
       else ok.push(f)
     }
     const room = MAX_ATTACHMENTS - staged.length
-    if (ok.length > room) bad.push(`за раз можно отправить не больше ${MAX_ATTACHMENTS} файлов`)
-    setError(bad.length ? `Не добавлено: ${bad.join('; ')}.` : '')
+    if (ok.length > room) bad.push(t('chat.tooManyFiles', { n: MAX_ATTACHMENTS }))
+    setError(bad.length ? t('chat.notAdded', { list: bad.join('; ') }) : '')
     if (!ok.length || room <= 0) return
     setStaged((s) => [...s, ...ok].slice(0, MAX_ATTACHMENTS))
     // На компьютере сразу ставим курсор в поле подписи; на телефоне не открываем клавиатуру сами
@@ -135,10 +136,10 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
   if (!contact && !group)
     return (
       <section className={`${shell} items-center justify-center gap-4`}>
-        <p className="muted">Чат удалён.</p>
+        <p className="muted">{t('chat.deleted')}</p>
         {/* На телефоне списка чатов рядом нет — без этой кнопки отсюда не уйти */}
         <button className="btn btn-soft md:hidden" onClick={onBack}>
-          <ChevronLeft className="size-5" /> К чатам
+          <ChevronLeft className="size-5" /> {t('chat.toChats')}
         </button>
       </section>
     )
@@ -169,7 +170,7 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
       }}
     >
       <header className="z-20 flex shrink-0 items-center gap-1 border-b border-slate-200/70 bg-white/85 px-1.5 pt-[env(safe-area-inset-top)] backdrop-blur-xl md:px-3 dark:border-white/6 dark:bg-surface-dark/85">
-        <button className="btn-icon md:hidden" onClick={onBack} aria-label="Назад">
+        <button className="btn-icon md:hidden" onClick={onBack} aria-label={t('chat.back')}>
           <ChevronLeft className="size-7" />
         </button>
         <button className="flex min-w-0 flex-1 items-center gap-3 rounded-2xl py-2 pr-2 text-left" onClick={() => setInfo(true)}>
@@ -178,13 +179,13 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
             <b className="truncate text-base font-semibold">{title}</b>
             {group ? (
               <small className="muted truncate text-xs">
-                {group.left ? 'вы больше не участник' : membersCount(group.members.length + 1)}
+                {group.left ? t('chat.notMember') : membersCount(group.members.length + 1)}
               </small>
             ) : gone ? (
-              <small className="truncate text-xs text-rose-500">удалил(а) чат</small>
+              <small className="truncate text-xs text-rose-500">{t('chat.goneShort')}</small>
             ) : (
               <small className="flex items-center gap-1 truncate text-xs text-emerald-600 dark:text-emerald-400">
-                <Lock className="size-3" /> сквозное шифрование
+                <Lock className="size-3" /> {t('common.e2e')}
               </small>
             )}
           </span>
@@ -192,14 +193,14 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
         {/* В группах звонков пока нет */}
         {!group && canWrite && (
           <>
-            <button className="btn-icon" onClick={() => void startCall(convId)} aria-label="Позвонить" title="Позвонить">
+            <button className="btn-icon" onClick={() => void startCall(convId)} aria-label={t('chat.call')} title={t('chat.call')}>
               <Phone className="size-5.5" />
             </button>
             <button
               className="btn-icon"
               onClick={() => void startCall(convId, true)}
-              aria-label="Видеозвонок"
-              title="Видеозвонок"
+              aria-label={t('chat.videoCall')}
+              title={t('chat.videoCall')}
             >
               <Video className="size-5.5" />
             </button>
@@ -208,8 +209,8 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
         <button
           className="btn-icon"
           onClick={() => setInfo(true)}
-          aria-label={group ? 'О группе' : 'О чате'}
-          title={group ? 'О группе' : 'О чате'}
+          aria-label={group ? t('chat.aboutGroup') : t('chat.aboutChat')}
+          title={group ? t('chat.aboutGroup') : t('chat.aboutChat')}
         >
           <Info className="size-5.5" />
         </button>
@@ -237,11 +238,11 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
               <div className="grid size-14 place-items-center rounded-2xl bg-brand text-white shadow-lg shadow-violet-500/30">
                 <ShieldCheck className="size-7" />
               </div>
-              <p className="font-semibold">{group ? 'Группа создана' : 'Чат создан'}</p>
+              <p className="font-semibold">{group ? t('chat.groupCreated') : t('chat.chatCreated')}</p>
               <p className="muted text-sm leading-relaxed">
                 {group
-                  ? 'Сообщения шифруются в браузере отдельно для каждого участника.'
-                  : 'Сообщения шифруются в браузере и расшифровываются только у собеседника.'}
+                  ? t('chat.groupE2e')
+                  : t('chat.directE2e')}
               </p>
             </div>
           )}
@@ -266,12 +267,12 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
       {group?.left && (
         <div className="flex shrink-0 items-center gap-2 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-800 dark:text-amber-200">
           <UserX className="size-4 shrink-0" />{' '}
-          {group.left === 'removed' ? 'Создатель удалил вас из группы.' : 'Вы вышли из группы.'} Писать сюда больше нельзя.
+          {group.left === 'removed' ? t('chat.removedFromGroup') : t('chat.leftGroup')} {t('chat.cantWriteHere')}
         </div>
       )}
       {gone && (
         <div className="flex shrink-0 items-center gap-2 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-800 dark:text-amber-200">
-          <UserX className="size-4 shrink-0" /> Собеседник удалил этот чат. Новые сообщения не будут доставлены.
+          <UserX className="size-4 shrink-0" /> {t('chat.peerGone')}
         </div>
       )}
       {error && (
@@ -313,8 +314,8 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
               className="btn-icon"
               disabled={!canWrite}
               onClick={() => fileRef.current?.click()}
-              aria-label="Прикрепить файл"
-              title="Прикрепить файл"
+              aria-label={t('chat.attach')}
+              title={t('chat.attach')}
             >
               <Paperclip className="size-5.5" />
             </button>
@@ -323,7 +324,7 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
               rows={1}
               value={text}
               disabled={!canWrite}
-              placeholder={!canWrite ? 'Писать некуда' : staged.length ? 'Добавить подпись…' : 'Сообщение'}
+              placeholder={!canWrite ? t('chat.placeholder.cant') : staged.length ? t('chat.placeholder.caption') : t('chat.placeholder.message')}
               className="composer-input max-h-40 min-h-11 min-w-0 flex-1 resize-none bg-transparent py-2.5 pr-4 text-base leading-6 outline-none placeholder:text-slate-400 dark:placeholder:text-slate-500"
               onChange={(e) => setText(e.target.value)}
               onPaste={(e) => {
@@ -344,7 +345,7 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
           <button
             className={`grid size-11 shrink-0 place-items-center rounded-full text-white transition active:scale-90 ${canSend ? 'bg-brand shadow-lg shadow-violet-500/35' : 'bg-slate-300 dark:bg-white/10 dark:text-slate-500'}`}
             disabled={!canSend}
-            aria-label="Отправить"
+            aria-label={t('chat.send')}
             // Не забираем фокус у поля: иначе на телефоне клавиатура прячется после каждой отправки
             onMouseDown={(e) => e.preventDefault()}
           >
@@ -356,7 +357,7 @@ export function ChatView({ convId, onBack, onDeleted }: { convId: string; onBack
       {dragging && (
         <div className="pointer-events-none absolute inset-3 z-30 grid place-items-center rounded-3xl border-2 border-dashed border-violet-500 bg-violet-500/10 backdrop-blur-sm">
           <p className="flex items-center gap-2 font-semibold text-violet-700 dark:text-violet-300">
-            <Paperclip className="size-5" /> Отпустите, чтобы прикрепить
+            <Paperclip className="size-5" /> {t('chat.dropHere')}
           </p>
         </div>
       )}
@@ -446,7 +447,7 @@ function MessageRow({
       <>
         {day}
         <div className="my-1.5 max-w-[85%] self-center rounded-2xl bg-slate-900/[0.05] px-3 py-1 text-center text-xs text-slate-500 dark:bg-white/[0.06] dark:text-slate-400">
-          {msg.text}
+          {messageLabel(msg)}
         </div>
       </>
     )
@@ -489,7 +490,7 @@ function SingleBubble({
       <div className={`relative max-w-[min(560px,82%)] animate-pop-in px-3.5 py-2 ${shape} ${color}`}>
         <span className={`${TEXT} inline-flex items-center gap-2`}>
           <Icon className={`size-4.5 shrink-0 ${bad && !mine ? 'text-rose-500' : ''}`} />
-          {msg.text}
+          {messageLabel(msg)}
         </span>
         <Meta msg={msg} mine={mine} onRetry={onRetry} />
       </div>
@@ -598,7 +599,7 @@ function Meta({
           : `float-right ml-2.5 translate-y-1.5 ${inset ? 'mr-1.5 mb-0.5' : ''} ${mine ? 'text-white/75' : 'text-slate-400 dark:text-slate-500'}`
       }`}
     >
-      {new Date(msg.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+      {formatClock(msg.ts)}
       {mine && <StatusMark status={msg.status} onRetry={onRetry} />}
     </span>
   )
@@ -608,21 +609,21 @@ function StatusMark({ status, onRetry }: { status: Message['status']; onRetry: (
   const cls = 'size-3.5'
   switch (status) {
     case 'pending':
-      return <Clock className={cls} aria-label="Ожидает отправки" />
+      return <Clock className={cls} aria-label={t('chat.status.pending')} />
     case 'sent':
-      return <Check className={cls} aria-label="Отправлено на сервер" />
+      return <Check className={cls} aria-label={t('chat.status.sent')} />
     case 'delivered':
-      return <CheckCheck className={cls} aria-label="Доставлено" />
+      return <CheckCheck className={cls} aria-label={t('chat.status.delivered')} />
     case 'read':
-      return <CheckCheck className={`${cls} text-cyan-200`} strokeWidth={2.75} aria-label="Прочитано" />
+      return <CheckCheck className={`${cls} text-cyan-200`} strokeWidth={2.75} aria-label={t('chat.status.read')} />
     case 'failed':
       return (
         <button
           className="inline-flex items-center gap-1 rounded-full bg-rose-500 px-2 py-0.5 font-semibold text-white"
-          title="Не отправлено — повторить"
+          title={t('chat.status.failed')}
           onClick={onRetry}
         >
-          <CircleAlert className="size-3" /> повторить
+          <CircleAlert className="size-3" /> {t('chat.retry')}
         </button>
       )
     default:
@@ -638,37 +639,37 @@ function ChatInfo({ convId, onClose, onDeleted }: { convId: string; onClose: () 
 
   if (!contact) return null
   return (
-    <Modal title="О чате" onClose={onClose}>
+    <Modal title={t('chat.aboutChat')} onClose={onClose}>
       <div className="mb-6 flex flex-col items-center gap-2 text-center">
         <Avatar name={contact.name} size="xl" />
         <p className="mt-1 text-xl font-bold">{contact.name}</p>
         <p className="flex items-center gap-1.5 text-sm text-emerald-600 dark:text-emerald-400">
-          <Lock className="size-3.5" /> сквозное шифрование
+          <Lock className="size-3.5" /> {t('common.e2e')}
         </p>
       </div>
 
       <ContactNameForm className="mb-6" contactId={contact.id} name={contact.name} selfName={contact.selfName} />
 
       <h3 className="section-title flex items-center gap-1.5">
-        <ShieldCheck className="size-4" /> Код безопасности
+        <ShieldCheck className="size-4" /> {t('common.safetyCode')}
       </h3>
       <p className="mb-2 rounded-2xl bg-brand-soft p-4 text-center font-mono text-lg font-medium tracking-wide [word-spacing:0.45em]">
         {safety ?? '…'}
       </p>
       <p className="muted mb-6 text-sm leading-relaxed">
-        Сверьте этот код с собеседником при встрече или по телефону. Если коды совпадают, никто не вклинился между вами.
+        {t('chat.safetyHint')}
       </p>
 
       {!confirm ? (
         <button className="btn btn-danger w-full" onClick={() => setConfirm(true)}>
-          <Trash2 className="size-5" /> Удалить чат…
+          <Trash2 className="size-5" /> {t('chat.delete')}
         </button>
       ) : (
         <>
-          <p className="mb-3 text-sm">Переписка удалится у вас, собеседник получит уведомление, что чат закрыт.</p>
+          <p className="mb-3 text-sm">{t('chat.deleteConfirm')}</p>
           <div className="grid grid-cols-2 gap-2.5">
             <button className="btn btn-soft" onClick={() => setConfirm(false)}>
-              Отмена
+              {t('common.cancel')}
             </button>
             <button
               className="btn btn-danger-solid"
@@ -678,7 +679,7 @@ function ChatInfo({ convId, onClose, onDeleted }: { convId: string; onClose: () 
                 onDeleted()
               }}
             >
-              Удалить
+              {t('common.delete')}
             </button>
           </div>
         </>

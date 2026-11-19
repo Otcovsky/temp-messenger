@@ -16,6 +16,7 @@
  */
 import { useSyncExternalStore } from 'react'
 import { randomId } from '../crypto/bytes'
+import type { Key } from '../i18n'
 import type { CallContent, CallEndReason } from '../protocol/envelope'
 import { callAlert } from '../push'
 import type { CallInfo, Contact } from '../storage/db'
@@ -37,8 +38,8 @@ export interface CallState {
   startedAt: number | null
   /** Связь пропала и, возможно, вернётся */
   unstable: boolean
-  /** Чем закончился звонок — текст для человека */
-  note: string | null
+  /** Чем закончился звонок — ключ перевода: экран звонка покажет его на текущем языке */
+  note: Key | null
   /** Звонок начат как видеозвонок */
   video: boolean
   /** Моя камера включена */
@@ -441,10 +442,10 @@ function lost(s: Session) {
     outcome: s.connectedAt ? 'answered' : 'failed',
     send: 'failed',
     note: s.connectedAt
-      ? 'Связь потеряна'
+      ? 'call.lost'
       : s.relayOnly && !s.gotRelay
-        ? 'Сервер звонков недоступен из этой сети'
-        : 'Не удалось соединиться',
+        ? 'call.turnBlocked'
+        : 'call.connectFailed',
   })
 }
 
@@ -455,7 +456,7 @@ interface Ending {
   send?: CallEndReason
   /** Сообщение о конце хранить на сервере долго: по нему собеседник узнает о пропущенном */
   keep?: boolean
-  note: string
+  note: Key
 }
 
 function finish(s: Session, end: Ending) {
@@ -497,7 +498,7 @@ function finish(s: Session, end: Ending) {
 }
 
 /** Показать на экране звонка, почему он не начался, не заводя сам звонок. */
-function refuse(contact: Contact, note: string) {
+function refuse(contact: Contact, note: Key) {
   const id = randomId()
   set({
     id, contactId: contact.id, name: contact.name, mine: true, phase: 'ended',
@@ -515,8 +516,8 @@ export async function startCall(contactId: string, video = false): Promise<void>
   if (!m || cur || state) return
   const contact = await m.contact(contactId)
   if (!contact || contact.gone || !contact.theirMailbox) return
-  if (!callsSupported()) return refuse(contact, 'Этот браузер не умеет звонить')
-  if (m.status !== 'online') return refuse(contact, 'Нет связи с сервером')
+  if (!callsSupported()) return refuse(contact, 'call.unsupported')
+  if (m.status !== 'online') return refuse(contact, 'common.noConnection')
 
   const s = newSession(randomId(), contact, true, video)
   unlockAudio()
@@ -525,7 +526,7 @@ export async function startCall(contactId: string, video = false): Promise<void>
     await capture(s, video)
   } catch (e) {
     console.warn('Микрофон недоступен', e)
-    return finish(s, { note: 'Нет доступа к микрофону' })
+    return finish(s, { note: 'call.noMic' })
   }
   if (!alive(s)) return stopMedia(s)
   showCamera(s)
@@ -541,9 +542,9 @@ export async function startCall(contactId: string, video = false): Promise<void>
     await m.sendCall(contactId, { type: 'call-offer', body: { call: s.id, sdp, ...(s.camTrack ? { video: true } : {}) } })
   } catch (e) {
     console.warn('Звонок не начался', e)
-    return finish(s, { note: 'Не удалось начать звонок' })
+    return finish(s, { note: 'call.startFailed' })
   }
-  later(s, RING_MS, () => finish(s, { outcome: 'noanswer', send: 'timeout', keep: true, note: 'Нет ответа' }))
+  later(s, RING_MS, () => finish(s, { outcome: 'noanswer', send: 'timeout', keep: true, note: 'call.noAnswer' }))
 }
 
 /** Ответить на входящий звонок (video — со своей камерой). Вызывать из обработчика нажатия. */
@@ -561,7 +562,7 @@ export async function acceptCall(video = false): Promise<void> {
     await capture(s, video)
   } catch (e) {
     console.warn('Микрофон недоступен', e)
-    return finish(s, { outcome: 'failed', send: 'failed', note: 'Нет доступа к микрофону' })
+    return finish(s, { outcome: 'failed', send: 'failed', note: 'call.noMic' })
   }
   if (!alive(s)) return stopMedia(s)
   showCamera(s)
@@ -583,7 +584,7 @@ export async function acceptCall(video = false): Promise<void> {
     })
   } catch (e) {
     console.warn('Не удалось ответить на звонок', e)
-    return finish(s, { outcome: 'failed', send: 'failed', note: 'Не удалось соединиться' })
+    return finish(s, { outcome: 'failed', send: 'failed', note: 'call.connectFailed' })
   }
   later(s, CONNECT_MS, () => !s.connectedAt && lost(s))
 }
@@ -596,10 +597,10 @@ export function hangup(): void {
     return
   }
   if (!s.answered) {
-    if (s.mine) finish(s, { outcome: 'cancelled', send: 'hangup', keep: true, note: 'Звонок отменён' })
-    else finish(s, { outcome: 'declined', send: 'decline', note: 'Звонок отклонён' })
+    if (s.mine) finish(s, { outcome: 'cancelled', send: 'hangup', keep: true, note: 'call.cancelled' })
+    else finish(s, { outcome: 'declined', send: 'decline', note: 'call.declined' })
   } else {
-    finish(s, { outcome: s.connectedAt ? 'answered' : 'failed', send: 'hangup', note: 'Звонок завершён' })
+    finish(s, { outcome: s.connectedAt ? 'answered' : 'failed', send: 'hangup', note: 'call.ended' })
   }
 }
 
@@ -697,7 +698,7 @@ async function onSignal(contact: Contact, c: CallContent): Promise<void> {
       s.offer = sdp
       startTone('ring')
       callAlert('ring')
-      later(s, INCOMING_MS, () => finish(s, { outcome: 'missed', note: 'Пропущенный звонок' }))
+      later(s, INCOMING_MS, () => finish(s, { outcome: 'missed', note: 'call.missed' }))
       return
     }
     case 'call-answer': {
@@ -716,7 +717,7 @@ async function onSignal(contact: Contact, c: CallContent): Promise<void> {
         await addRemoteCandidates(s, s.remoteCandidates.splice(0))
       } catch (e) {
         console.warn('Ответ на звонок не подошёл', e)
-        return finish(s, { outcome: 'failed', send: 'failed', note: 'Не удалось соединиться' })
+        return finish(s, { outcome: 'failed', send: 'failed', note: 'call.connectFailed' })
       }
       later(s, CONNECT_MS, () => !s.connectedAt && lost(s))
       return
@@ -752,15 +753,15 @@ async function onSignal(contact: Contact, c: CallContent): Promise<void> {
         return
       }
       if (s.answered) {
-        finish(s, { outcome: s.connectedAt ? 'answered' : 'failed', note: s.connectedAt ? 'Звонок завершён' : 'Не удалось соединиться' })
+        finish(s, { outcome: s.connectedAt ? 'answered' : 'failed', note: s.connectedAt ? 'call.ended' : 'call.connectFailed' })
       } else if (!s.mine) {
-        finish(s, { outcome: 'missed', note: 'Пропущенный звонок' })
+        finish(s, { outcome: 'missed', note: 'call.missed' })
       } else if (reason === 'decline') {
-        finish(s, { outcome: 'declined', note: 'Звонок отклонён' })
+        finish(s, { outcome: 'declined', note: 'call.declined' })
       } else if (reason === 'busy') {
-        finish(s, { outcome: 'busy', note: 'Собеседник занят' })
+        finish(s, { outcome: 'busy', note: 'call.busy' })
       } else {
-        finish(s, { outcome: 'failed', note: 'Не удалось соединиться' })
+        finish(s, { outcome: 'failed', note: 'call.connectFailed' })
       }
       return
     }

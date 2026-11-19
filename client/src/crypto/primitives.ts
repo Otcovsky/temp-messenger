@@ -11,6 +11,7 @@
  * с разными браузерами полностью совместимы.
  */
 import { ed25519, x25519 } from '@noble/curves/ed25519.js'
+import { t } from '../i18n'
 import { type Bytes, concat } from './bytes'
 
 const subtle = globalThis.crypto.subtle
@@ -176,7 +177,7 @@ export async function aesGcmDecrypt(key: Bytes, iv: Bytes, ct: Bytes, ad: Bytes)
 /** Проверка, что браузер умеет всё нужное. X25519/Ed25519 при необходимости заменяются JS-реализацией. */
 export async function checkSupport(): Promise<string | null> {
   if (!globalThis.isSecureContext || !globalThis.crypto?.subtle) {
-    return 'Нужен HTTPS (или localhost): Web Crypto недоступен.'
+    return t('support.https')
   }
   try {
     const a = await generateDH()
@@ -189,8 +190,8 @@ export async function checkSupport(): Promise<string | null> {
     await aesGcmEncrypt(new Uint8Array(32), new Uint8Array(12), data, data)
   } catch (e) {
     console.error('Проверка криптографии не прошла', e)
-    return 'Браузер не поддерживает нужную криптографию (Web Crypto). Попробуйте Chrome, Firefox или Safari.'
+    return t('support.crypto')
   }
-  if (!('indexedDB' in globalThis)) return 'Браузер не поддерживает IndexedDB.'
+  if (!('indexedDB' in globalThis)) return t('support.idb')
   return null
 }

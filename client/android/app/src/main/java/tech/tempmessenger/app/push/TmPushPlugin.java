@@ -128,6 +128,14 @@ public class TmPushPlugin extends Plugin {
         call.resolve();
     }
 
+    /** Язык уведомлений — тот, что выбран в приложении (ru, en…) */
+    @PluginMethod
+    public void setLanguage(PluginCall call) {
+        String lang = call.getString("lang", "");
+        if (lang != null && lang.matches("[a-z]{2,3}")) TmNotifier.setLanguage(getContext(), lang);
+        call.resolve();
+    }
+
     /** Следующие 20 секунд пуш покажется и при открытом приложении — для кнопки «Проверить» */
     @PluginMethod
     public void expectTest(PluginCall call) {

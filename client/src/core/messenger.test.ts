@@ -149,7 +149,11 @@ vi.mock('../transport/blobs', async (importOriginal) => {
   }
 })
 
+import { setLang } from '../i18n'
 import { Messenger } from './messenger'
+
+// Тексты в проверках — русские
+setLang('ru', false)
 
 /** Открытые методы Messenger плюс доступ к внутренностям, нужным тестам */
 type Client = Omit<Messenger, never> & { db: any; transport: any }

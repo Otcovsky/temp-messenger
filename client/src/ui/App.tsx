@@ -7,6 +7,7 @@ import { ChatView } from './ChatView'
 import { CallOverlay } from './CallUi'
 import { AcceptInviteDialog } from './InviteDialogs'
 import { MessengerContext, useMessenger, useVersion } from './hooks'
+import { getLang, hasSavedLang, setLang, t } from '../i18n'
 import { requestPersistence } from '../pwa'
 import { initPush } from '../push'
 import { Onboarding } from './Onboarding'
@@ -50,6 +51,9 @@ export function App() {
       const run = async () => {
         if (cancelled) return
         const m = await Messenger.open()
+        // Выбора языка раньше не было, и всё было по-русски: у кого аккаунт уже есть, тот остаётся на русском.
+        // Новичку запоминаем язык его устройства — дальше его можно сменить в настройках
+        if (!hasSavedLang()) setLang(m.hasAccount ? 'ru' : getLang())
         initPush(m)
         initCalls(m)
         if (m.hasAccount) m.start()
@@ -83,14 +87,14 @@ export function App() {
     )
   if (boot.kind === 'error')
     return (
-      <Center icon={<TriangleAlert className="size-7" />} title="Не получится запустить">
+      <Center icon={<TriangleAlert className="size-7" />} title={t('app.cantStart')}>
         {boot.text}
       </Center>
     )
   if (boot.kind === 'locked') {
     return (
-      <Center icon={<MessagesSquare className="size-7" />} title="Открыто в другой вкладке">
-        Мессенджер работает только в одной вкладке. Закройте ту — эта подхватит работу автоматически.
+      <Center icon={<MessagesSquare className="size-7" />} title={t('app.locked.title')}>
+        {t('app.locked.text')}
       </Center>
     )
   }
@@ -128,8 +132,8 @@ function Main({ invite, clearInvite }: { invite: string | null; clearInvite: () 
             <ShieldCheck className="size-10" strokeWidth={1.75} />
           </div>
           <div>
-            <p className="text-lg font-semibold">Выберите чат</p>
-            <p className="muted mt-1">или пригласите собеседника — переписка шифруется прямо в браузере</p>
+            <p className="text-lg font-semibold">{t('app.pickChat')}</p>
+            <p className="muted mt-1">{t('app.pickChatHint')}</p>
           </div>
         </section>
       )}

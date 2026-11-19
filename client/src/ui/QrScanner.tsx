@@ -5,6 +5,7 @@
  */
 import { Camera, ImageUp, Loader2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { t } from '../i18n'
 import { Modal } from './Modal'
 
 type Decoder = (img: ImageData) => Promise<string | null>
@@ -59,10 +60,10 @@ function cameraBlockedByPolicy(): boolean {
 
 function cameraError(e: unknown): string {
   const name = e instanceof DOMException ? e.name : ''
-  if (name === 'PolicyError') return 'Сфотографируйте QR-код или выберите готовое фото.'
-  if (name === 'NotAllowedError') return 'Доступ к камере запрещён. Разрешите его в настройках сайта или выберите фото с QR-кодом.'
-  if (name === 'NotFoundError' || name === 'OverconstrainedError') return 'Камера не найдена. Выберите фото с QR-кодом.'
-  return 'Не удалось включить камеру. Выберите фото с QR-кодом.'
+  if (name === 'PolicyError') return t('qr.policy')
+  if (name === 'NotAllowedError') return t('qr.denied')
+  if (name === 'NotFoundError' || name === 'OverconstrainedError') return t('qr.noCamera')
+  return t('qr.cameraFailed')
 }
 
 export function QrScanner({ onResult, onClose }: { onResult: (text: string) => void; onClose: () => void }) {
@@ -137,15 +138,15 @@ export function QrScanner({ onResult, onClose }: { onResult: (text: string) => v
       const text = await (await getDecoder())(frame(ctx, bmp, bmp.width, bmp.height, PHOTO_MAX_SIDE))
       bmp.close()
       if (text) finish(text)
-      else setError('На фото не найден QR-код. Попробуйте снять ближе и ровнее.')
+      else setError(t('qr.notFound'))
     } catch {
-      setError('Не удалось прочитать изображение.')
+      setError(t('qr.badImage'))
     }
   }
 
   const corner = 'absolute size-9 border-white'
   return (
-    <Modal title="Сканировать QR-код" onClose={onClose}>
+    <Modal title={t('qr.title')} onClose={onClose}>
       <div className="grid gap-4">
         {!error && (
           <div className="relative aspect-square overflow-hidden rounded-3xl bg-black">
@@ -158,7 +159,7 @@ export function QrScanner({ onResult, onClose }: { onResult: (text: string) => v
             </div>
             {starting && (
               <p className="absolute inset-0 flex items-center justify-center gap-2 text-white">
-                <Loader2 className="size-5 animate-spin" /> Включаю камеру…
+                <Loader2 className="size-5 animate-spin" /> {t('qr.starting')}
               </p>
             )}
           </div>
@@ -169,10 +170,10 @@ export function QrScanner({ onResult, onClose }: { onResult: (text: string) => v
             <span>{error}</span>
           </p>
         ) : (
-          <p className="muted text-center text-sm">Наведите камеру на QR-код приглашения</p>
+          <p className="muted text-center text-sm">{t('qr.aim')}</p>
         )}
         <label role="button" className={`btn w-full ${error ? 'btn-primary' : 'btn-soft'}`}>
-          <ImageUp className="size-5" /> Сфотографировать или выбрать фото
+          <ImageUp className="size-5" /> {t('qr.photo')}
           <input type="file" accept="image/*" hidden onChange={(e) => void fromFile(e.target.files?.[0])} />
         </label>
       </div>

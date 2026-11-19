@@ -78,6 +78,8 @@ interface TmPushPlugin {
   show(o: { kind: 'msg' | 'call' | 'stop' | 'missed' }): Promise<void>
   /** Следующие 20 с пуш покажется и при открытом приложении — для кнопки «Проверить» */
   expectTest(): Promise<void>
+  /** Язык уведомлений, которые приложение показывает само (ru, en…) */
+  setLanguage(o: { lang: string }): Promise<void>
 }
 
 /**

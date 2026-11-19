@@ -1,5 +1,6 @@
 import { Bell, BellOff, BellRing, Download, PhoneCall, RefreshCw, Smartphone, X } from 'lucide-react'
 import { useState } from 'react'
+import { t } from '../i18n'
 import { isNativeApp } from '../platform'
 import { applyUpdate, isIos, isStandalone, promptInstall, usePwa } from '../pwa'
 import { disablePush, enablePush, testPush, usePush } from '../push'
@@ -14,9 +15,9 @@ export function UpdateToast() {
       className="fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] left-1/2 z-[60] flex max-w-[calc(100%-2rem)] -translate-x-1/2 animate-pop-in items-center gap-3 rounded-full bg-slate-900/90 py-1.5 pr-1.5 pl-4 text-sm text-white shadow-2xl backdrop-blur-xl dark:bg-white/15"
     >
       <RefreshCw className="size-4 shrink-0 text-violet-300" />
-      <span className="truncate">Доступна новая версия</span>
+      <span className="truncate">{t('pwa.updateReady')}</span>
       <button className="btn btn-sm btn-primary rounded-full" onClick={applyUpdate}>
-        Обновить
+        {t('pwa.update')}
       </button>
     </div>
   )
@@ -54,21 +55,19 @@ export function InstallBanner() {
       <div className="flex items-center gap-3 rounded-[23px] bg-white/95 p-2.5 pl-3 dark:bg-surface-dark/95">
         <img className="size-11 shrink-0 rounded-xl" src="/icon-192.png" alt="" width={44} height={44} />
         <span className="flex min-w-0 flex-col flex-1">
-          <b className="text-sm font-semibold">Установите приложение</b>
-          <small className="muted truncate text-xs">Значок, отдельное окно, запуск без сети</small>
+          <b className="text-sm font-semibold">{t('pwa.install.title')}</b>
+          <small className="muted truncate text-xs">{t('pwa.install.text')}</small>
         </span>
         <button className="btn btn-sm btn-primary px-3.5" onClick={promptInstall}>
-          <Download className="size-4" /> Установить
+          <Download className="size-4" /> {t('pwa.install')}
         </button>
-        <button className="btn-icon size-8" onClick={dismiss} title="Скрыть" aria-label="Скрыть">
+        <button className="btn-icon size-8" onClick={dismiss} title={t('pwa.hide')} aria-label={t('pwa.hide')}>
           <X className="size-4" />
         </button>
       </div>
     </div>
   )
 }
-
-const IOS_STEPS = 'В Safari нажмите «Поделиться» (квадрат со стрелкой) → «На экран „Домой“».'
 
 /** Подсказка для iPhone/iPad перед регистрацией: ставить приложение надо до первого чата. */
 export function IosInstallHint({ hasInvite }: { hasInvite: boolean }) {
@@ -77,11 +76,10 @@ export function IosInstallHint({ hasInvite }: { hasInvite: boolean }) {
     <div className="note note-warn mb-4">
       <Smartphone className="mt-0.5 size-5 shrink-0" />
       <div>
-        <b>Сначала установите приложение.</b> На iPhone и iPad Safari стирает данные сайтов, которые давно не
-        открывали, а у приложения на экране «Домой» отдельное хранилище: чаты, начатые здесь, туда не перейдут.
-        <p className="mt-2">{IOS_STEPS}</p>
+        <b>{t('pwa.iosFirst')}</b> {t('pwa.iosWhy')}
+        <p className="mt-2">{t('pwa.iosSteps')}</p>
         {hasInvite && (
-          <p className="mt-2">Ссылку-приглашение сохраните заранее: в приложении нажмите «Присоединиться» и вставьте её.</p>
+          <p className="mt-2">{t('pwa.iosInvite')}</p>
         )}
       </div>
     </div>
@@ -94,34 +92,31 @@ export function AppSection() {
   const standalone = isStandalone()
   return (
     <>
-      <h3 className="section-title">Приложение</h3>
+      <h3 className="section-title">{t('pwa.section')}</h3>
       <div className="grid gap-3 rounded-2xl bg-slate-900/[0.03] p-4 text-sm leading-relaxed dark:bg-white/[0.04]">
         {standalone ? (
-          <p className="muted">Открыто как установленное приложение.</p>
+          <p className="muted">{t('pwa.standalone')}</p>
         ) : canInstall ? (
           <>
-            <p className="muted">Установите мессенджер как приложение: отдельное окно, значок и запуск без сети.</p>
+            <p className="muted">{t('pwa.installExplain')}</p>
             <button className="btn btn-primary w-full" onClick={promptInstall}>
-              <Download className="size-5" /> Установить приложение
+              <Download className="size-5" /> {t('pwa.installApp')}
             </button>
           </>
         ) : isIos() ? (
           <p className="muted">
-            {IOS_STEPS} Учтите: у установленного приложения своё хранилище, текущие чаты туда не перейдут.
+            {t('pwa.iosSteps')} {t('pwa.iosNote')}
           </p>
         ) : (
           <p className="muted">
-            Установить можно из меню браузера («Установить приложение» или «Добавить на главный экран»).
+            {t('pwa.menuInstall')}
           </p>
         )}
         {persisted !== null && (
           <p className="flex items-start gap-2">
             <span className={`mt-1.5 size-2 shrink-0 rounded-full ${persisted ? 'bg-emerald-500' : 'bg-amber-400'}`} />
             <span className="muted">
-              Хранилище:{' '}
-              {persisted
-                ? 'постоянное — браузер не сотрёт данные сам.'
-                : 'браузер может очистить его при нехватке места или долгом простое.'}
+              {t('pwa.storage')} {persisted ? t('pwa.persisted') : t('pwa.notPersisted')}
             </span>
           </p>
         )}
@@ -148,29 +143,25 @@ export function NotificationsSection() {
     body = (
       <p className="muted">
         {isIos() && !isStandalone()
-          ? 'На iPhone и iPad уведомления работают только в приложении, установленном на экран «Домой».'
-          : 'Этот браузер не умеет показывать уведомления от сайтов.'}
+          ? t('push.iosOnly')
+          : t('push.unsupported')}
       </p>
     )
   } else if (serverReady === false) {
-    body = <p className="muted">На этом сервере уведомления не настроены.</p>
+    body = <p className="muted">{t('push.notConfigured')}</p>
   } else if (permission === 'denied') {
     body = (
       <p className="muted">
         {isNativeApp
-          ? 'Уведомления запрещены в настройках телефона. Разрешите их для Temp Messenger (Настройки → Приложения) и вернитесь сюда.'
-          : 'Уведомления запрещены в настройках браузера. Разрешите их для этого сайта и вернитесь сюда.'}
+          ? t('push.deniedNative')
+          : t('push.deniedWeb')}
       </p>
     )
   } else {
     body = (
       <>
         <p className="muted">
-          {isNativeApp
-            ? 'Когда приложение закрыто, сервер будит его через Google (Firebase). '
-            : 'Когда приложение закрыто, сервер будит его через пуш-сервис браузера (Google, Apple или Mozilla). '}
-          В уведомлении нет ни текста, ни имени — только «Новое сообщение». Пуш-сервис узнаёт лишь время, когда вам
-          пишут.
+          {isNativeApp ? t('push.howNative') : t('push.howWeb')} {t('push.privacy')}
         </p>
         {enabled ? (
           <>
@@ -180,8 +171,8 @@ export function NotificationsSection() {
               />
               <span className="muted">
                 {confirmed
-                  ? 'Включены: сервер знает, как разбудить это устройство.'
-                  : 'Включены, но сервер ещё не подтвердил подписку этого устройства.'}
+                  ? t('push.confirmed')
+                  : t('push.unconfirmed')}
               </span>
             </p>
             <div className="grid grid-cols-2 gap-2.5">
@@ -190,19 +181,19 @@ export function NotificationsSection() {
                 onClick={() => run(() => testPush())}
                 disabled={busy || !confirmed || test?.ok === null}
               >
-                <BellRing className="size-5" /> Проверить
+                <BellRing className="size-5" /> {t('push.test')}
               </button>
               <button
                 className="btn btn-primary"
                 onClick={() => run(() => testPush('call'))}
                 disabled={busy || !confirmed || test?.ok === null}
-                title="Пробное уведомление о входящем звонке"
+                title={t('push.testCallTitle')}
               >
-                <PhoneCall className="size-5" /> Звонок
+                <PhoneCall className="size-5" /> {t('push.testCall')}
               </button>
             </div>
             <button className="btn btn-soft w-full" onClick={() => run(disablePush)} disabled={busy}>
-              <BellOff className="size-5" /> Выключить уведомления
+              <BellOff className="size-5" /> {t('push.disable')}
             </button>
             {test && (
               <p className={`note ${test.ok === false ? 'note-error' : 'note-info'}`} role="status">
@@ -216,7 +207,7 @@ export function NotificationsSection() {
             onClick={() => run(enablePush)}
             disabled={busy || serverReady === null}
           >
-            <Bell className="size-5" /> {serverReady === null ? 'Нет связи с сервером' : 'Включить уведомления'}
+            <Bell className="size-5" /> {serverReady === null ? t('common.noConnection') : t('push.enable')}
           </button>
         )}
         {error && <p className="note note-error">{error}</p>}
@@ -226,7 +217,7 @@ export function NotificationsSection() {
 
   return (
     <>
-      <h3 className="section-title mt-6">Уведомления</h3>
+      <h3 className="section-title mt-6">{t('push.section')}</h3>
       <div className="grid gap-3 rounded-2xl bg-slate-900/[0.03] p-4 text-sm leading-relaxed dark:bg-white/[0.04]">
         {body}
       </div>

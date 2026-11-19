@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { t } from '../i18n'
 import { useMessenger } from './hooks'
 
 /**
@@ -32,7 +33,7 @@ export function ContactNameForm({
       }}
     >
       <label className="section-title block" htmlFor={inputId}>
-        Имя (видно только вам)
+        {t('contact.nameLabel')}
       </label>
       <div className="flex gap-2">
         <input
@@ -44,10 +45,10 @@ export function ContactNameForm({
           onChange={(e) => setDraft(e.target.value)}
         />
         <button className="btn btn-soft shrink-0" disabled={!changed}>
-          Сохранить
+          {t('common.save')}
         </button>
       </div>
-      {selfName && selfName !== name && <p className="muted mt-1.5 text-xs">Сам(а) себя называет: «{selfName}»</p>}
+      {selfName && selfName !== name && <p className="muted mt-1.5 text-xs">{t('contact.selfName', { name: selfName })}</p>}
     </form>
   )
 }

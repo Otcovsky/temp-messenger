@@ -4,10 +4,21 @@ import { join, relative } from 'node:path'
 import { type Plugin, type ResolvedConfig, defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { DICTS } from './src/i18n/dicts'
+
+/** Тексты уведомлений для sw.js — из тех же словарей, что и приложение */
+function notificationTexts(): string {
+  const keys = { message: 'notify.message', call: 'notify.call', callBody: 'notify.callBody', missed: 'notify.missed' } as const
+  const out: Record<string, Record<string, unknown>> = {}
+  for (const [lang, dict] of Object.entries(DICTS)) {
+    out[lang] = Object.fromEntries(Object.entries(keys).map(([name, key]) => [name, dict[key]]))
+  }
+  return JSON.stringify(out)
+}
 
 /**
- * Собирает dist/sw.js из шаблона sw.js: список всех файлов сборки (кроме карт исходников)
- * и версию — хеш их содержимого. В режиме разработки service worker не используется.
+ * Собирает dist/sw.js из шаблона sw.js: список всех файлов сборки (кроме карт исходников),
+ * версию — хеш их содержимого — и тексты уведомлений. В режиме разработки service worker не используется.
  */
 function serviceWorker(): Plugin {
   let config: ResolvedConfig
@@ -39,6 +50,7 @@ function serviceWorker(): Plugin {
       const sw = readFileSync(join(config.root, 'sw.js'), 'utf8')
         .replace('__VERSION__', version)
         .replace('__PRECACHE__', JSON.stringify(urls))
+        .replace('__TEXTS__', notificationTexts())
       writeFileSync(join(outDir, 'sw.js'), sw)
       config.logger.info(`sw.js: версия ${version}, файлов в кеше: ${urls.length}`)
     },

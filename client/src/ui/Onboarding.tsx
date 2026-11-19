@@ -1,6 +1,8 @@
 import { ArrowRight, HardDrive, Loader2, Lock, MailOpen, ShieldCheck, TriangleAlert } from 'lucide-react'
 import { useState } from 'react'
+import { t } from '../i18n'
 import { useMessenger } from './hooks'
+import { LanguagePicker } from './LanguagePicker'
 import { IosInstallHint } from './PwaUi'
 
 export function Onboarding({ hasInvite }: { hasInvite: boolean }) {
@@ -20,7 +22,7 @@ export function Onboarding({ hasInvite }: { hasInvite: boolean }) {
     } catch (err) {
       // Раньше кнопка навсегда оставалась в «Создаю ключи…» без объяснений
       console.error('Не удалось создать аккаунт', err)
-      setError(`Не удалось создать ключи: ${err instanceof Error ? err.message : String(err)}`)
+      setError(t('onb.failed', { why: err instanceof Error ? err.message : String(err) }))
       setBusy(false)
     }
   }
@@ -28,6 +30,7 @@ export function Onboarding({ hasInvite }: { hasInvite: boolean }) {
   return (
     <div className="min-h-dvh overflow-y-auto bg-aurora px-4 pt-[max(2.5rem,env(safe-area-inset-top))] pb-[max(1.5rem,env(safe-area-inset-bottom))]">
       <div className="mx-auto flex w-full max-w-md flex-col">
+        <LanguagePicker compact className="mb-4 self-end" />
         <div className="mb-7 flex flex-col items-center text-center">
           <div className="relative mb-5">
             <div className="absolute inset-0 rounded-[30px] bg-brand opacity-50 blur-2xl" />
@@ -38,15 +41,15 @@ export function Onboarding({ hasInvite }: { hasInvite: boolean }) {
           <h1 className="text-[32px] leading-tight font-extrabold tracking-tight">
             Temp <span className="text-brand">Messenger</span>
           </h1>
-          <p className="muted mt-2 max-w-xs">Переписка, которая живёт только на вашем устройстве</p>
+          <p className="muted mt-2 max-w-xs">{t('onb.tagline')}</p>
         </div>
 
         <ul className="mb-5 grid gap-2.5">
-          <Feature icon={<Lock className="size-5" />} title="Сквозное шифрование">
-            Ключи создаются здесь и никогда не покидают устройство
+          <Feature icon={<Lock className="size-5" />} title={t('onb.e2e.title')}>
+            {t('onb.e2e.text')}
           </Feature>
-          <Feature icon={<HardDrive className="size-5" />} title="Всё хранится в браузере">
-            На сервере — лишь зашифрованная очередь недоставленных сообщений
+          <Feature icon={<HardDrive className="size-5" />} title={t('onb.local.title')}>
+            {t('onb.local.text')}
           </Feature>
         </ul>
 
@@ -55,11 +58,11 @@ export function Onboarding({ hasInvite }: { hasInvite: boolean }) {
           {hasInvite && (
             <p className="note note-info mb-4">
               <MailOpen className="mt-0.5 size-5 shrink-0 text-violet-500" />
-              <span>Вас пригласили в чат. Представьтесь, чтобы принять приглашение.</span>
+              <span>{t('onb.invited')}</span>
             </p>
           )}
           <label className="section-title block" htmlFor="my-name">
-            Как вас называть собеседникам
+            {t('onb.nameLabel')}
           </label>
           <input
             id="my-name"
@@ -68,12 +71,12 @@ export function Onboarding({ hasInvite }: { hasInvite: boolean }) {
             maxLength={64}
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Имя"
+            placeholder={t('onb.namePlaceholder')}
             autoComplete="nickname"
           />
           <button className="btn btn-primary w-full" disabled={busy || !name.trim()}>
             {busy ? <Loader2 className="size-5 animate-spin" /> : null}
-            {busy ? 'Создаю ключи…' : 'Начать'}
+            {busy ? t('onb.creating') : t('onb.start')}
             {!busy && <ArrowRight className="size-5" />}
           </button>
           {error && <p className="note note-error mt-3">{error}</p>}
@@ -82,8 +85,7 @@ export function Onboarding({ hasInvite }: { hasInvite: boolean }) {
         <p className="note note-warn mt-4">
           <TriangleAlert className="mt-0.5 size-5 shrink-0" />
           <span>
-            Очистка данных сайта, удаление браузера или режим инкогнито после закрытия окна — и всё исчезнет
-            безвозвратно. Восстановить нельзя.
+            {t('onb.warning')}
           </span>
         </p>
       </div>

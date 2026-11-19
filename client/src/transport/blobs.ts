@@ -4,6 +4,7 @@
  */
 import { type Bytes, b64e, utf8 } from '../crypto/bytes'
 import { type KeyPair, sign } from '../crypto/primitives'
+import { t } from '../i18n'
 import { serverOrigin } from '../platform'
 
 /**
@@ -19,26 +20,25 @@ export class BlobError extends Error {
   }
 }
 
-const NO_FILES = 'Сервер не принимает файлы. Он ещё не обновлён или настроен без них.'
 
 function refusal(status: number): BlobError {
   switch (status) {
     case 413:
-      return new BlobError('Файл слишком большой для сервера.', true)
+      return new BlobError(t('blob.tooBig'), true)
     case 507:
-      return new BlobError('На сервере сейчас нет места для файлов. Попробуйте позже.', true)
+      return new BlobError(t('blob.noSpace'), true)
     case 404:
     case 405:
-      return new BlobError(NO_FILES, true)
+      return new BlobError(t('blob.noFiles'), true)
     case 403:
-      return new BlobError('Сервер не принял подпись загрузки.', true)
+      return new BlobError(t('blob.badSignature'), true)
     case 429:
       // Ограничение частоты запросов с одного адреса (nginx): много файлов сразу. Это не отказ —
       // попытка повторится позже.
-      return new BlobError('Сервер просит подождать: слишком много файлов сразу.', false)
+      return new BlobError(t('blob.slowDown'), false)
     default:
       // 5xx — сервер перезапускается или перегружен: попробуем позже
-      return new BlobError(`Сервер отклонил файл (${status}).`, status < 500)
+      return new BlobError(t('blob.rejected', { status }), status < 500)
   }
 }
 
@@ -56,7 +56,7 @@ export async function putBlob(id: string, ct: Bytes, recipients: number, auth: K
       cache: 'no-store',
     })
   } catch {
-    throw new BlobError('Нет связи с сервером.', false)
+    throw new BlobError(t('blob.offline'), false)
   }
   if (!res.ok) throw refusal(res.status)
 }
@@ -67,16 +67,16 @@ export async function getBlob(id: string): Promise<Bytes | null> {
   try {
     res = await fetch(url(id), { cache: 'no-store' })
   } catch {
-    throw new BlobError('Нет связи с сервером.', false)
+    throw new BlobError(t('blob.offline'), false)
   }
   if (res.status === 404) return null
   if (!res.ok) throw refusal(res.status)
   // Сервер без поддержки файлов отвечает на любой путь страницей приложения
-  if (res.headers.get('content-type')?.startsWith('text/html')) throw new BlobError(NO_FILES, true)
+  if (res.headers.get('content-type')?.startsWith('text/html')) throw new BlobError(t('blob.noFiles'), true)
   try {
     return new Uint8Array(await res.arrayBuffer()) as Bytes
   } catch {
-    throw new BlobError('Связь прервалась во время скачивания.', false)
+    throw new BlobError(t('blob.interrupted'), false)
   }
 }
 

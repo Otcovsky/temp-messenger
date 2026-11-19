@@ -1,8 +1,8 @@
 {
   "name": "Temp Messenger",
   "short_name": "Temp Messenger",
-  "description": "Одноразовый мессенджер со сквозным шифрованием. Всё хранится только на устройстве.",
-  "lang": "ru",
+  "description": "Disposable end-to-end encrypted messenger. Everything stays on your device.",
+  "lang": "en",
   "id": "/",
   "start_url": "/",
   "scope": "/",

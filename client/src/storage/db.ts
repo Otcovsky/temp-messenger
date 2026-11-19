@@ -49,6 +49,11 @@ export interface Conversation {
   title: string
   lastTs: number
   lastText: string
+  /**
+   * Последняя строка — служебная или о звонке: её список чатов переводит заново на текущий язык
+   * (lastText записан на языке того момента). У обычного сообщения поля нет.
+   */
+  lastLabel?: { note: NoteInfo } | { call: CallInfo; mine: boolean }
   unread: number
   /** Только у групп */
   group?: GroupInfo
@@ -89,6 +94,8 @@ export interface Message {
   text: string
   /** Запись о звонке. Хранится только у себя: собеседнику не отправляется */
   call?: CallInfo
+  /** Что за служебная строка: по нему она показывается на текущем языке (у старых записей нет — тогда text) */
+  note?: NoteInfo
   status: MessageStatus
   /** Для входящих: отправлена ли квитанция «прочитано» */
   readSent?: boolean
@@ -100,6 +107,12 @@ export interface Message {
   transfer?: 'up' | 'down'
   /** Файлы, отправленные одной пачкой, показываются одним пузырём-альбомом */
   album?: string
+}
+
+/** Служебная строка группы: вид события и, если нужно, чьё имя или новое название */
+export interface NoteInfo {
+  k: 'created' | 'joined' | 'removed' | 'renamed' | 'addedMe' | 'removedMe' | 'readded' | 'left' | 'nowAdmin'
+  name?: string
 }
 
 export interface CallInfo {

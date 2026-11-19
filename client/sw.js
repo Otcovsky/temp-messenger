@@ -10,6 +10,8 @@
 const VERSION = '__VERSION__'
 const PRECACHE = __PRECACHE__
 const CACHE = `tm-${VERSION}`
+/** Тексты уведомлений по языкам: { ru: { message, call, callBody, missed }, en: … } — из словарей приложения */
+const TEXTS = __TEXTS__
 
 self.addEventListener('install', (event) => {
   // cache: 'reload' — мимо HTTP-кеша, чтобы не закешировать устаревший index.html
@@ -55,6 +57,22 @@ const bounded = (work, ms = 5000) => Promise.race([work.catch(() => {}), sleep(m
 /** До этого момента идёт проверка уведомлений из настроек: пуш показываем, даже если приложение открыто */
 let testUntil = 0
 
+/**
+ * Язык уведомлений — выбранный в приложении: страница кладёт его в Cache Storage (src/i18n/sync.ts),
+ * localStorage service worker'у недоступен. Не нашли — язык устройства, иначе английский.
+ */
+async function texts() {
+  let lang = ''
+  try {
+    const r = await caches.match('/__prefs/lang', { cacheName: 'prefs' })
+    if (r) lang = (await r.text()).trim()
+  } catch {
+    /* кеш недоступен — возьмём язык устройства */
+  }
+  if (!TEXTS[lang]) lang = String(self.navigator.language || '').toLowerCase().split('-')[0]
+  return TEXTS[lang] || TEXTS.en
+}
+
 async function appVisible() {
   const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
   return windows.some((c) => c.visibilityState === 'visible')
@@ -73,10 +91,11 @@ async function showQuietly(tag) {
 async function ring(testing) {
   const id = ++ringId
   const times = testing ? 3 : RING_TIMES
+  const tx = await texts()
   for (let i = 0; i < times && ringId === id; i++) {
     if (!testing && (await appVisible())) return closeTag(CALL_TAG) // человек открыл приложение
-    await self.registration.showNotification('Входящий звонок', {
-      body: 'Нажмите, чтобы ответить',
+    await self.registration.showNotification(tx.call, {
+      body: tx.callBody,
       icon: '/icon-192.png',
       tag: CALL_TAG,
       renotify: true, // каждый повтор — снова звук и вибрация
@@ -96,7 +115,7 @@ async function onPush(kind) {
     ringId++
     await closeTag(CALL_TAG)
     if (visible) return showQuietly(MISSED_TAG)
-    return self.registration.showNotification('Пропущенный звонок', {
+    return self.registration.showNotification((await texts()).missed, {
       icon: '/icon-192.png',
       tag: MISSED_TAG,
       renotify: true,
@@ -104,7 +123,7 @@ async function onPush(kind) {
   }
   if (visible) return showQuietly(PUSH_TAG)
   return self.registration.showNotification('Temp Messenger', {
-    body: 'Новое сообщение',
+    body: (await texts()).message,
     icon: '/icon-192.png',
     tag: PUSH_TAG,
     renotify: true,

@@ -42,6 +42,7 @@ import {
   type GroupInfo,
   type Message,
   type MessageStatus,
+  type NoteInfo,
   type Profile,
   allMailboxes,
   getAuthKey,
@@ -60,6 +61,7 @@ import {
   wipeStore,
   writeAll,
 } from '../storage/db'
+import { t } from '../i18n'
 import { isNativeApp, serverOrigin } from '../platform'
 import { BlobError, blobDone, getBlob, putBlob } from '../transport/blobs'
 import { type ConnStatus, type InviteState, type ServerFrame, Transport, defaultServerUrl } from '../transport/ws'
@@ -84,25 +86,23 @@ const PROBE_TIMEOUT_MS = 10_000
 const REGISTER_TIMEOUT_MS = 8_000
 /** Сколько id уже обработанных входящих помнить, чтобы не разбирать повторную доставку */
 const HANDLED_MAX = 2_000
-const NO_CONNECTION = 'Нет связи с сервером. Попробуйте ещё раз, когда связь появится.'
 /** Типы содержимого, о которых получателю стоит показать уведомление */
 const NOTIFY_TYPES = new Set(['hello', 'text', 'file'])
 /** Сколько секунд живёт сигнал звонка: дольше вызов всё равно не длится */
 export const CALL_SIGNAL_TTL_SEC = 60
 const ICE_TIMEOUT_MS = 4_000
-const NO_ANSWER = 'Сервер не ответил. Проверьте связь и попробуйте ещё раз.'
 
 /** Понятный текст для отказа сервера (кадр error) на register или probe. */
 function serverRefusal(code: string): string {
   switch (code) {
     case 'too_many_mailboxes':
-      return 'Слишком много открытых приглашений и чатов. Отзовите ненужные приглашения и попробуйте снова.'
+      return t('err.tooManyMailboxes')
     case 'rate_limited':
-      return 'Слишком много запросов к серверу. Подождите немного и попробуйте снова.'
+      return t('err.rateLimited')
     case 'forbidden':
-      return 'Сервер не принял ящик для приглашения. Попробуйте создать ссылку ещё раз.'
+      return t('err.mailboxRejected')
     default:
-      return `Сервер отклонил запрос (${code}). Попробуйте ещё раз.`
+      return t('err.rejected', { code })
   }
 }
 
@@ -220,9 +220,9 @@ export class Messenger {
         if (s !== 'online') {
           this.inFlight.clear()
           // Ответа по разорванному соединению уже не будет — не держим человека до таймаута
-          this.probes.rejectAll(new Error(NO_CONNECTION))
-          this.registers.rejectAll(new Error(NO_CONNECTION))
-          this.iceWaiters.rejectAll(new Error(NO_CONNECTION))
+          this.probes.rejectAll(new Error(t('err.noConnection')))
+          this.registers.rejectAll(new Error(t('err.noConnection')))
+          this.iceWaiters.rejectAll(new Error(t('err.noConnection')))
         }
         this.emit()
       },
@@ -434,7 +434,7 @@ export class Messenger {
    * собеседник, открыв её, услышит от сервера «такого приглашения нет».
    */
   async createInvite(): Promise<PendingInvite> {
-    if (!(await this.waitOnline(PROBE_TIMEOUT_MS))) throw new Error(NO_CONNECTION)
+    if (!(await this.waitOnline(PROBE_TIMEOUT_MS))) throw new Error(t('err.noConnection'))
     const inv = await createInviteCrypto(this.identity!, this.profile!.name)
     await this.db.put('invites', inv)
     try {
@@ -458,7 +458,7 @@ export class Messenger {
   /** Сервер молчит: проверить, живо ли соединение, и вернуть ошибку для человека. */
   private noAnswer(): Error {
     this.transport?.checkAlive()
-    return new Error(NO_ANSWER)
+    return new Error(t('err.noAnswer'))
   }
 
   /** Приглашения-ссылки, которые ещё никто не принял (без служебных «знакомств» по группе). */
@@ -495,7 +495,7 @@ export class Messenger {
   /** Спросить сервер, ждёт ли ещё ящик-приглашение ответа. */
   private async probeInvite(mailbox: string): Promise<InviteState> {
     const deadline = Date.now() + PROBE_TIMEOUT_MS
-    if (!(await this.waitOnline(PROBE_TIMEOUT_MS))) throw new Error(NO_CONNECTION)
+    if (!(await this.waitOnline(PROBE_TIMEOUT_MS))) throw new Error(t('err.noConnection'))
     return this.probes.wait(mailbox, Math.max(1000, deadline - Date.now()), () => this.noAnswer(), () =>
       this.send({ t: 'probe', mailbox }),
     )
@@ -512,10 +512,10 @@ export class Messenger {
    * иначе null. Чат создаём, только если пригласивший ещё ждёт ответа: иначе сообщения ушли бы в никуда.
    */
   async checkInvite(invite: InvitePayload): Promise<string | null> {
-    if (invite.ik === b64e(this.identity!.dh.pub)) return 'Это ваше собственное приглашение.'
+    if (invite.ik === b64e(this.identity!.dh.pub)) return t('invite.own')
     const state = await this.probeInvite(invite.m)
-    if (state === 'used') return 'По этой ссылке уже подключились. Попросите собеседника создать новую.'
-    if (state === 'none') return 'Приглашение больше не действует: его отозвали, или собеседник удалил чат. Попросите новую ссылку.'
+    if (state === 'used') return t('invite.used')
+    if (state === 'none') return t('invite.gone')
     return null
   }
 
@@ -529,7 +529,7 @@ export class Messenger {
     const { session, preKey } = await acceptInviteCrypto(me, invite)
     const contact: Contact = {
       id: randomId(),
-      name: invite.n?.trim() || 'Без имени',
+      name: invite.n?.trim() || t('common.noName'),
       ...(invite.n?.trim() ? { selfName: invite.n.trim() } : {}),
       myMailbox: randomId(),
       theirMailbox: invite.m,
@@ -558,15 +558,15 @@ export class Messenger {
   /** Беседа и те, кому в неё писать: собеседник или участники группы, с которыми есть канал. */
   private async chat(convId: string): Promise<{ conv: Conversation; targets: Contact[] }> {
     const conv = await this.db.get('conversations', convId)
-    if (!conv) throw new Error('Беседа не найдена')
+    if (!conv) throw new Error(t('err.noConversation'))
     if (conv.group) {
-      if (conv.group.left) throw new Error('Вы больше не участник этой группы')
+      if (conv.group.left) throw new Error(t('err.notMember'))
       const targets = await this.groupTargets(conv.group)
-      if (!targets.length) throw new Error('В группе пока некому писать: участники ещё подключаются')
+      if (!targets.length) throw new Error(t('err.nobodyYet'))
       return { conv, targets }
     }
     const contact = await this.db.get('contacts', conv.members[0])
-    if (!contact) throw new Error('Беседа не найдена')
+    if (!contact) throw new Error(t('err.noConversation'))
     return { conv, targets: [contact] }
   }
 
@@ -597,7 +597,7 @@ export class Messenger {
     const { conv, targets } = await this.chat(convId)
     const msg: Message = { id: randomId(), conv: convId, from: 'me', ts: Date.now(), type: 'text', text, status: 'pending' }
     await this.db.put('messages', msg)
-    await this.touchConversation(convId, { lastTs: msg.ts, lastText: text })
+    await this.touchConversation(convId, { lastTs: msg.ts, lastText: text, lastLabel: undefined })
     this.emit()
     try {
       await this.sendToChat(conv, targets, { id: msg.id, ts: msg.ts, type: 'text', body: { text } }, msg.id)
@@ -624,11 +624,11 @@ export class Messenger {
     if (!files.length) return
     for (const file of files) {
       const name = cleanFileName(file.name)
-      if (file.size > MAX_FILE) throw new Error(`«${name}» больше ${MAX_FILE / 1024 / 1024} МБ, такие файлы отправить нельзя.`)
-      if (!file.size) throw new Error(`«${name}» — пустой файл.`)
+      if (file.size > MAX_FILE) throw new Error(t('err.fileTooBig', { name, mb: MAX_FILE / 1024 / 1024 }))
+      if (!file.size) throw new Error(t('err.fileEmpty', { name }))
     }
     const { conv, targets } = await this.chat(convId)
-    if (!conv.group && (!targets[0].theirMailbox || targets[0].gone)) throw new Error('Собеседнику больше нельзя писать')
+    if (!conv.group && (!targets[0].theirMailbox || targets[0].gone)) throw new Error(t('err.peerGone'))
     const text = caption.trim().slice(0, MAX_TEXT)
     const album = files.length > 1 ? randomId() : undefined
     const now = Date.now()
@@ -653,7 +653,7 @@ export class Messenger {
       ...batch.map(({ msg }) => tx.objectStore('messages').put(msg)),
       ...batch.map(({ msg, data }) => tx.objectStore('files').put({ id: msg.id, data })),
     ])
-    await this.touchConversation(convId, { lastTs: lastMsg.ts, lastText: fileLabel(lastMsg.file!.name, text) })
+    await this.touchConversation(convId, { lastTs: lastMsg.ts, lastText: fileLabel(lastMsg.file!.name, text), lastLabel: undefined })
     this.emit()
     let failure: unknown
     for (const { msg } of batch) {
@@ -822,9 +822,9 @@ export class Messenger {
   /** envId — id конверта, если он должен отличаться от id содержимого (копии группового сообщения). */
   private sendContent(contact: Contact, content: Content, msgId?: string, ttl?: number, envId?: string): Promise<void> {
     return this.serial(async () => {
-      if (!contact.theirMailbox || contact.gone) throw new Error('Собеседнику больше нельзя писать')
+      if (!contact.theirMailbox || contact.gone) throw new Error(t('err.peerGone'))
       const sess = await this.db.get('sessions', contact.id)
-      if (!sess) throw new Error('Нет сессии шифрования')
+      if (!sess) throw new Error(t('err.noSession'))
       const r = await ratchetEncrypt(sess.state, encodeContent(content))
       const payload = encodePayload(r.header, r.ciphertext, sess.preKey)
       const to = contact.theirMailbox
@@ -897,7 +897,7 @@ export class Messenger {
       const said = String(hello.body.name || '').trim().slice(0, NAME_MAX)
       const created: Contact = {
         id: randomId(),
-        name: said || (intro ? 'Участник' : 'Без имени'),
+        name: said || (intro ? t('common.member') : t('common.noName')),
         ...(said ? { selfName: said } : {}),
         ...(intro ? { groupOnly: true } : {}),
         myMailbox: mailbox,
@@ -1049,7 +1049,7 @@ export class Messenger {
       ...fields,
     })
     await conversations.put({
-      ...conv, lastTs: Math.max(conv.lastTs, c.ts), lastText: group ? `${contact.name}: ${preview}` : preview,
+      ...conv, lastTs: Math.max(conv.lastTs, c.ts), lastText: group ? `${contact.name}: ${preview}` : preview, lastLabel: undefined,
       unread: isOpen ? 0 : conv.unread + 1,
     })
     return () => {
@@ -1078,7 +1078,7 @@ export class Messenger {
    */
   sendCall(contactId: string, signal: Pick<CallContent, 'type' | 'body'>, keep = false): Promise<void> {
     return this.db.get('contacts', contactId).then((contact) => {
-      if (!contact) throw new Error('Контакт не найден')
+      if (!contact) throw new Error(t('err.noContact'))
       const content = { id: randomId(), ts: Date.now(), ...signal } as CallContent
       return this.sendContent(contact, content, undefined, keep ? undefined : CALL_SIGNAL_TTL_SEC)
     })
@@ -1103,7 +1103,7 @@ export class Messenger {
         id: callId, conv: conv.id, from: mine ? 'me' : contactId, ts, type: 'call', text, status: 'received', readSent: true, call,
       })
       await conversations.put({
-        ...conv, lastTs: Math.max(conv.lastTs, ts), lastText: text,
+        ...conv, lastTs: Math.max(conv.lastTs, ts), lastText: text, lastLabel: { call, mine },
         unread: call.outcome === 'missed' && !isOpen ? conv.unread + 1 : conv.unread,
       })
     })
@@ -1241,32 +1241,33 @@ export class Messenger {
   }
 
   /** Служебная строка в ленте группы. Возвращает беседу с обновлённой строкой для списка чатов. */
-  private async note(tx: ReceiveTx | GroupTx, conv: Conversation, text: string, unread = false): Promise<Conversation> {
-    const t = tx as GroupTx
+  private async note(tx: ReceiveTx | GroupTx, conv: Conversation, note: NoteInfo, unread = false): Promise<Conversation> {
+    const store = tx as GroupTx
+    const text = noteLabel(note)
     // Строки, записанные подряд, должны и в ленте идти в том же порядке — время строго растёт
     const now = (this.lastNoteTs = Math.max(Date.now(), this.lastNoteTs + 1))
-    await t.objectStore('messages').put({
-      id: randomId(), conv: conv.id, from: '', ts: now, type: 'note', text, status: 'received', readSent: true,
+    await store.objectStore('messages').put({
+      id: randomId(), conv: conv.id, from: '', ts: now, type: 'note', text, note, status: 'received', readSent: true,
     })
     const isOpen = this.activeConv === conv.id && document.visibilityState === 'visible'
-    const next = { ...conv, lastTs: now, lastText: text, unread: conv.unread + (unread && !isOpen ? 1 : 0) }
-    await t.objectStore('conversations').put(next)
+    const next = { ...conv, lastTs: now, lastText: text, lastLabel: { note }, unread: conv.unread + (unread && !isOpen ? 1 : 0) }
+    await store.objectStore('conversations').put(next)
     return next
   }
 
   /** Создать группу из своих контактов. Возвращает её id. */
   async createGroup(name: string, contactIds: string[]): Promise<string> {
     name = name.trim().slice(0, NAME_MAX)
-    if (!name) throw new Error('Дайте группе название')
+    if (!name) throw new Error(t('err.groupName'))
     const roster = await this.rosterOf(contactIds)
-    if (!roster.length) throw new Error('Выберите хотя бы одного участника')
-    if (roster.length >= MAX_GROUP) throw new Error(`В группе может быть не больше ${MAX_GROUP} человек`)
+    if (!roster.length) throw new Error(t('err.pickMember'))
+    if (roster.length >= MAX_GROUP) throw new Error(t('err.groupFull', { max: MAX_GROUP }))
     const conv: Conversation = {
       id: randomId(), kind: 'group', members: [], title: name, lastTs: Date.now(), lastText: '', unread: 0,
       group: { admin: 'me', rev: 1, roster },
     }
     await transact(this.db, ['conversations', 'messages'], async (tx) => {
-      await this.note(tx, conv, 'Вы создали группу')
+      await this.note(tx, conv, { k: 'created' })
     })
     this.emit()
     await this.broadcastGroup(conv)
@@ -1292,20 +1293,20 @@ export class Messenger {
    */
   private async editGroup(
     gid: string,
-    change: (conv: Conversation, group: GroupInfo) => { title?: string; roster?: GroupMemberInfo[]; notes: string[] },
+    change: (conv: Conversation, group: GroupInfo) => { title?: string; roster?: GroupMemberInfo[]; notes: NoteInfo[] },
   ): Promise<void> {
     let before: GroupInfo | undefined
     let after: Conversation | undefined
     await transact(this.db, ['conversations', 'messages'], async (tx) => {
       const conv = await tx.objectStore('conversations').get(gid)
       const g = conv?.group
-      if (!conv || !g || g.left) throw new Error('Группа не найдена')
-      if (g.admin !== 'me') throw new Error('Менять группу может только её администратор')
+      if (!conv || !g || g.left) throw new Error(t('err.noGroup'))
+      if (g.admin !== 'me') throw new Error(t('err.adminOnly'))
       const { title, roster, notes } = change(conv, g)
       before = g
       let next: Conversation = { ...conv, title: title ?? conv.title, group: { ...g, rev: g.rev + 1, roster: roster ?? g.roster } }
       await tx.objectStore('conversations').put(next)
-      for (const text of notes) next = await this.note(tx, next, text)
+      for (const note of notes) next = await this.note(tx, next, note)
       after = next
     })
     this.emit()
@@ -1324,15 +1325,15 @@ export class Messenger {
     const added = await this.rosterOf(contactIds)
     await this.editGroup(gid, (_conv, g) => {
       const fresh = added.filter((a) => !g.roster.some((m) => m.ik === a.ik))
-      if (g.roster.length + fresh.length >= MAX_GROUP) throw new Error(`В группе может быть не больше ${MAX_GROUP} человек`)
-      return { roster: [...g.roster, ...fresh], notes: fresh.map((m) => `${m.name} теперь в группе`) }
+      if (g.roster.length + fresh.length >= MAX_GROUP) throw new Error(t('err.groupFull', { max: MAX_GROUP }))
+      return { roster: [...g.roster, ...fresh], notes: fresh.map((m): NoteInfo => ({ k: 'joined', name: m.name })) }
     })
   }
 
   async removeGroupMember(gid: string, ik: string): Promise<void> {
     await this.editGroup(gid, (_conv, g) => {
       const gone = g.roster.find((m) => m.ik === ik)
-      return { roster: g.roster.filter((m) => m.ik !== ik), notes: gone ? [`${gone.name} больше не в группе`] : [] }
+      return { roster: g.roster.filter((m) => m.ik !== ik), notes: gone ? [{ k: 'removed', name: gone.name }] : [] }
     })
   }
 
@@ -1341,7 +1342,7 @@ export class Messenger {
     if (!name) return
     await this.editGroup(gid, (conv) => ({
       title: name,
-      notes: conv.title === name ? [] : [`Группа теперь называется «${name}»`],
+      notes: conv.title === name ? [] : [{ k: 'renamed', name }],
     }))
   }
 
@@ -1381,7 +1382,7 @@ export class Messenger {
     const conv = await this.db.get('conversations', gid)
     if (!conv?.group) return
     if (!conv.group.left) {
-      if (conv.group.admin === 'me') throw new Error('Создатель не может выйти из группы — только удалить её')
+      if (conv.group.admin === 'me') throw new Error(t('err.creatorCantLeave'))
       await this.announceLeave(conv)
     }
     await this.eraseGroup(gid)
@@ -1392,7 +1393,7 @@ export class Messenger {
     const conv = await this.db.get('conversations', gid)
     if (!conv?.group) return
     if (!conv.group.left) {
-      if (conv.group.admin !== 'me') throw new Error('Удалить группу может только её создатель')
+      if (conv.group.admin !== 'me') throw new Error(t('err.creatorOnlyDelete'))
       await this.announceDelete(conv)
     }
     await this.eraseGroup(gid)
@@ -1443,12 +1444,12 @@ export class Messenger {
     for (const m of b.members.slice(0, MAX_GROUP)) {
       if (!m || typeof m.ik !== 'string' || !IK_RE.test(m.ik) || seen.has(m.ik)) continue
       seen.add(m.ik)
-      members.push({ ik: m.ik, name: String(m.name ?? '').trim().slice(0, NAME_MAX) || 'Участник' })
+      members.push({ ik: m.ik, name: String(m.name ?? '').trim().slice(0, NAME_MAX) || t('common.member') })
     }
     if (!seen.has(contact.ik)) return
     const amIn = seen.has(me)
     const roster = members.filter((m) => m.ik !== me)
-    const title = b.name.trim().slice(0, NAME_MAX) || 'Группа'
+    const title = b.name.trim().slice(0, NAME_MAX) || t('common.group')
     const conversations = tx.objectStore('conversations')
     const old = await conversations.get(gid)
 
@@ -1458,23 +1459,23 @@ export class Messenger {
         id: gid, kind: 'group', members: [], title, lastTs: Date.now(), lastText: '', unread: 0,
         group: { admin: contact.ik, rev: b.rev, roster },
       }
-      await this.note(tx, conv, `${contact.name} добавил(а) вас в группу`, true)
+      await this.note(tx, conv, { k: 'addedMe', name: contact.name }, true)
     } else {
       const g = old.group
       if (!g || g.admin !== contact.ik || b.rev <= g.rev) return
       if (!amIn) {
         if (g.left) return
-        await this.note(tx, { ...old, group: { ...g, rev: b.rev, left: 'removed' } }, 'Вас удалили из группы', true)
+        await this.note(tx, { ...old, group: { ...g, rev: b.rev, left: 'removed' } }, { k: 'removedMe' }, true)
       } else {
         let conv: Conversation = { ...old, title, group: { admin: g.admin, rev: b.rev, roster } }
         await conversations.put(conv)
-        if (g.left) conv = await this.note(tx, conv, 'Вас снова добавили в группу', true)
-        if (title !== old.title) conv = await this.note(tx, conv, `Группа теперь называется «${title}»`)
+        if (g.left) conv = await this.note(tx, conv, { k: 'readded' }, true)
+        if (title !== old.title) conv = await this.note(tx, conv, { k: 'renamed', name: title })
         for (const m of roster) {
-          if (!g.roster.some((x) => x.ik === m.ik)) conv = await this.note(tx, conv, `${m.name} теперь в группе`)
+          if (!g.roster.some((x) => x.ik === m.ik)) conv = await this.note(tx, conv, { k: 'joined', name: m.name })
         }
         for (const m of g.roster) {
-          if (!seen.has(m.ik)) conv = await this.note(tx, conv, `${m.name} больше не в группе`)
+          if (!seen.has(m.ik)) conv = await this.note(tx, conv, { k: 'removed', name: m.name })
         }
       }
     }
@@ -1502,8 +1503,8 @@ export class Messenger {
     // Мой номер состояния растёт, только если состоянием управляю я
     let next: Conversation = { ...conv, group: { ...g, admin, roster, rev: mine || admin === 'me' ? g.rev + 1 : g.rev } }
     await tx.objectStore('conversations').put(next)
-    next = await this.note(tx, next, `${contact.name} вышел(ла) из группы`)
-    if (admin === 'me' && !mine) next = await this.note(tx, next, 'Теперь группой управляете вы', true)
+    next = await this.note(tx, next, { k: 'left', name: contact.name })
+    if (admin === 'me' && !mine) next = await this.note(tx, next, { k: 'nowAdmin' }, true)
     return () => {
       // Вышедший мог знать не всех — администратор сообщает новый состав остальным
       if (mine) void this.broadcastGroup(next).catch(() => {})
@@ -1587,7 +1588,7 @@ export class Messenger {
     const said = invite.n?.trim().slice(0, NAME_MAX)
     const created: Contact = {
       id: randomId(),
-      name: said || 'Участник',
+      name: said || t('common.member'),
       ...(said ? { selfName: said } : {}),
       groupOnly: true,
       myMailbox: randomId(),
@@ -1674,7 +1675,7 @@ class Waiters<T> {
       this.map.set(key, [...(this.map.get(key) ?? []), w])
       if (!send()) {
         this.remove(key, w)
-        w.reject(new Error(NO_CONNECTION))
+        w.reject(new Error(t('err.noConnection')))
       }
     })
   }
@@ -1711,7 +1712,7 @@ export const fileLabel = (name: string, caption = '') => `📎 ${caption || name
 /** Имя файла без путей и управляющих символов, не длиннее 200 знаков (расширение сохраняется). */
 function cleanFileName(name: string): string {
   const n = name.replace(/[\u0000-\u001f\u007f/\\]/g, '_').trim()
-  return (n.length > 200 ? `${n.slice(0, 150)}…${n.slice(-49)}` : n) || 'файл'
+  return (n.length > 200 ? `${n.slice(0, 150)}…${n.slice(-49)}` : n) || t('common.file')
 }
 
 function cleanMime(mime: string): string {
@@ -1729,27 +1730,47 @@ function parseFile(b: unknown): FileInfo | null {
   return { blob, key, size, name: cleanFileName(String(name ?? '')), mime: cleanMime(String(mime ?? '')), state: 'loading' }
 }
 
-/** Строка о звонке для ленты и списка чатов. */
+/** Строка о звонке для ленты и списка чатов — на текущем языке. */
 export function callLabel(mine: boolean, call: CallInfo): string {
   switch (call.outcome) {
     case 'answered': {
       const s = Math.max(0, Math.round(call.duration ?? 0))
       const time = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
-      return `${mine ? 'Исходящий' : 'Входящий'} ${call.video ? 'видеозвонок' : 'звонок'} · ${time}`
+      const key = call.video ? (mine ? 'callLog.outgoingVideo' : 'callLog.incomingVideo') : mine ? 'callLog.outgoing' : 'callLog.incoming'
+      return t(key, { time })
     }
     case 'missed':
-      return call.video ? 'Пропущенный видеозвонок' : 'Пропущенный звонок'
+      return t(call.video ? 'callLog.missedVideo' : 'callLog.missed')
     case 'declined':
-      return mine ? 'Звонок отклонён' : 'Отклонённый звонок'
+      return t(mine ? 'callLog.declinedByPeer' : 'callLog.declined')
     case 'noanswer':
-      return 'Звонок без ответа'
+      return t('callLog.noanswer')
     case 'busy':
-      return 'Собеседник был занят'
+      return t('callLog.busy')
     case 'cancelled':
-      return 'Отменённый звонок'
+      return t('callLog.cancelled')
     case 'failed':
-      return 'Звонок не удался'
+      return t('callLog.failed')
   }
+}
+
+/** Служебная строка группы на текущем языке */
+export const noteLabel = (note: NoteInfo): string =>
+  t(`note.${note.k}`, note.name === undefined ? undefined : { name: note.name })
+
+/** Служебная строка или звонок — на текущем языке (их текст в базе записан на языке того момента) */
+export function messageLabel(msg: Message): string {
+  if (msg.type === 'note' && msg.note) return noteLabel(msg.note)
+  if (msg.type === 'call' && msg.call) return callLabel(msg.from === 'me', msg.call)
+  return msg.text
+}
+
+/** Последняя строка беседы в списке чатов; служебная строка или звонок — на текущем языке. */
+export function conversationPreview(c: Conversation): string {
+  const l = c.lastLabel
+  if (l && 'note' in l) return noteLabel(l.note)
+  if (l && 'call' in l) return callLabel(l.mine, l.call)
+  return c.lastText
 }
 
 function newConversation(contact: Contact): Conversation {

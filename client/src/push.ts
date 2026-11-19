@@ -9,6 +9,7 @@
 import { useSyncExternalStore } from 'react'
 import type { Messenger } from './core/messenger'
 import { b64d, b64e } from './crypto/bytes'
+import { t } from './i18n'
 import { type NativePermission, TmPush } from './native'
 import { isNativeApp } from './platform'
 
@@ -99,9 +100,9 @@ export function usePush(): PushState {
 }
 
 function refusal(code: string): string {
-  if (code === 'bad_endpoint') return 'Сервер не знает пуш-сервис этого браузера. Попробуйте Chrome, Firefox или Safari.'
-  if (code === 'bad_keys') return 'Сервер не принял ключи подписки этого браузера.'
-  return 'Сервер не поддерживает уведомления.'
+  if (code === 'bad_endpoint') return t('push.badEndpoint')
+  if (code === 'bad_keys') return t('push.badKeys')
+  return t('push.serverNoPush')
 }
 
 function endTest(text: string, ok: boolean) {
@@ -114,7 +115,7 @@ export function initPush(m: Messenger): void {
   messenger = m
   m.onPush = (e) => {
     if (e.t === 'incoming') {
-      void notifyIfHidden('Новое сообщение')
+      void notifyIfHidden(t('notify.message'))
     } else if (e.t === 'ready') {
       set({ serverReady: isNativeApp ? m.pushFcm : !!m.pushKey, confirmed: false })
       void sync()
@@ -125,7 +126,7 @@ export function initPush(m: Messenger): void {
     } else if (e.code === 'no_subscription') {
       // Сервер подписку не знает (потерял или её удалил пуш-сервис) — заводим заново
       set({ confirmed: false })
-      endTest('Сервер не знал подписку этого устройства. Отправил её заново — нажмите «Проверить» ещё раз.', false)
+      endTest(t('push.resubscribed'), false)
       void sync()
     } else {
       set({ confirmed: false, error: refusal(e.code) })
@@ -182,8 +183,8 @@ export function callAlert(kind: 'ring' | 'stop' | 'missed'): void {
   if (!supported) return
   if (kind === 'ring') {
     const ring = () =>
-      void showHidden('Входящий звонок', {
-        body: 'Нажмите, чтобы ответить',
+      void showHidden(t('notify.call'), {
+        body: t('notify.callBody'),
         tag: CALL_TAG,
         renotify: true,
         requireInteraction: true,
@@ -194,7 +195,7 @@ export function callAlert(kind: 'ring' | 'stop' | 'missed'): void {
     return
   }
   void clearNotifications(CALL_TAG).then(() => {
-    if (kind === 'missed') return showHidden('Пропущенный звонок', { tag: MISSED_TAG, renotify: true })
+    if (kind === 'missed') return showHidden(t('notify.missed'), { tag: MISSED_TAG, renotify: true })
   })
 }
 
@@ -210,7 +211,7 @@ export function notifyIfHidden(body: string): Promise<void> {
 function activeWorker(): Promise<ServiceWorkerRegistration> {
   return Promise.race([
     navigator.serviceWorker.ready,
-    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('service worker не запущен')), SW_TIMEOUT_MS)),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('service worker timeout')), SW_TIMEOUT_MS)),
   ])
 }
 
@@ -245,11 +246,11 @@ async function sync(renew = false): Promise<void> {
     set({ error: null })
     // Ключи подписки нужны серверу, чтобы зашифровать пометку «звонок»: пуш-сервис её не прочтёт
     const keys = sub.toJSON().keys ?? {}
-    if (!m.setPushEndpoint({ endpoint: sub.endpoint, p256dh: keys.p256dh, auth: keys.auth })) set({ error: 'Нет связи с сервером. Подписка отправится, когда связь появится.' })
+    if (!m.setPushEndpoint({ endpoint: sub.endpoint, p256dh: keys.p256dh, auth: keys.auth })) set({ error: t('push.offlineLater') })
   } catch (e) {
     console.warn('Не удалось подписаться на уведомления', e)
     const why = e instanceof Error ? e.message : String(e)
-    set({ error: `Браузер не выдал подписку на уведомления (${why}). Проверьте связь и попробуйте ещё раз.` })
+    set({ error: t('push.subscribeFailed', { why }) })
   }
 }
 
@@ -267,18 +268,18 @@ async function syncNative(m: Messenger, renew: boolean): Promise<void> {
       return
     }
     if (!s.available) {
-      set({ error: 'В этой сборке приложения нет настроек Firebase — уведомления не заработают.' })
+      set({ error: t('push.noFirebase') })
       return
     }
     if (renew) await TmPush.unregister() // Google сказал, что токена больше нет: берём новый
     const { token, key } = await TmPush.register()
     set({ error: null })
-    if (!m.setPushEndpoint({ fcm: token, key })) set({ error: 'Нет связи с сервером. Подписка отправится, когда связь появится.' })
+    if (!m.setPushEndpoint({ fcm: token, key })) set({ error: t('push.offlineLater') })
   } catch (e) {
     console.warn('Не удалось получить токен FCM', e)
     const why = e instanceof Error ? e.message : String(e)
     set({
-      error: `Google не выдал токен для уведомлений (${why}). Нужны сервисы Google Play и связь с интернетом.`,
+      error: t('push.fcmFailed', { why }),
     })
   }
 }
@@ -325,16 +326,16 @@ export async function disablePush(): Promise<void> {
 export async function testPush(kind?: 'call'): Promise<void> {
   if (!supported || !messenger) return
   testKind = kind
-  set({ test: { text: kind ? 'Отправляю пробный звонок…' : 'Отправляю пробное уведомление…', ok: null } })
+  set({ test: { text: kind ? t('push.testingCall') : t('push.testing'), ok: null } })
   try {
     if (isNativeApp) await TmPush.expectTest()
     else (await activeWorker()).active?.postMessage('pushTest')
   } catch {
-    return endTest('Service worker не запущен — перезапустите приложение.', false)
+    return endTest(t('push.noWorker'), false)
   }
-  if (!messenger.testPush(kind)) return endTest('Нет связи с сервером.', false)
+  if (!messenger.testPush(kind)) return endTest(t('push.testOffline'), false)
   clearTimeout(testTimer)
-  testTimer = setTimeout(() => endTest('Сервер не ответил на проверку.', false), TEST_TIMEOUT_MS)
+  testTimer = setTimeout(() => endTest(t('push.testTimeout'), false), TEST_TIMEOUT_MS)
 }
 
 let testKind: 'call' | undefined
@@ -342,19 +343,15 @@ let testKind: 'call' | undefined
 function onTestResult(status: number) {
   if (status >= 200 && status < 300) {
     endTest(
-      (testKind
-        ? 'Пуш-сервис принял звонок — телефон должен несколько раз подать сигнал и завибрировать. '
-        : 'Пуш-сервис принял уведомление — оно должно появиться за несколько секунд. ') +
-        'Если ничего нет, проверьте в настройках телефона, что браузеру (или приложению) разрешены уведомления ' +
-        'и не включён режим «Не беспокоить».',
+      `${testKind ? t('push.testOkCall') : t('push.testOk')} ${t('push.testOkHint')}`,
       true,
     )
   } else if (status === 404 || status === 410) {
-    endTest('Пуш-сервис ответил, что подписки больше нет. Получаю новую — нажмите «Проверить» ещё раз.', false)
+    endTest(t('push.testGone'), false)
     void sync(true)
   } else if (status === 0) {
-    endTest(isNativeApp ? 'Сервер не смог связаться с Firebase.' : 'Сервер не смог связаться с пуш-сервисом браузера.', false)
+    endTest(isNativeApp ? t('push.testNoFirebase') : t('push.testNoService'), false)
   } else {
-    endTest(`Пуш-сервис отклонил уведомление (HTTP ${status}).`, false)
+    endTest(t('push.testRejected', { status }), false)
   }
 }

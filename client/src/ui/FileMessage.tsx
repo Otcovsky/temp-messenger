@@ -1,6 +1,7 @@
 import { Download, FileText, Loader2, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { Messenger } from '../core/messenger'
+import { t } from '../i18n'
 import { saveFileNative } from '../native'
 import { isNativeApp } from '../platform'
 import type { Message } from '../storage/db'
@@ -62,7 +63,7 @@ function ImageViewer({ msg, url, onClose }: { msg: Message; url: string; onClose
     <Modal title={msg.file!.name} onClose={onClose} wide>
       <img className="mx-auto mb-4 block max-h-[65dvh] max-w-full rounded-2xl" src={url} alt={msg.file!.name} />
       <button className="btn btn-primary w-full" onClick={() => void saveFile(m, msg)}>
-        <Download className="size-5" /> Сохранить
+        <Download className="size-5" /> {t('file.save')}
       </button>
     </Modal>
   )
@@ -115,7 +116,7 @@ export function FileMessage({ msg }: { msg: Message }) {
         style={imageBox(size.w, size.h)}
         disabled={!imageUrl}
         onClick={() => setViewing(true)}
-        aria-label={`Открыть ${file.name}`}
+        aria-label={t('file.open', { name: file.name })}
       >
         {imageUrl && <img className="block size-full" src={imageUrl} alt={file.name} />}
       </button>
@@ -136,7 +137,7 @@ export function MediaTile({ msg, className = '' }: { msg: Message; className?: s
         className={`relative block overflow-hidden bg-slate-900/10 transition active:brightness-90 dark:bg-white/8 ${className}`}
         disabled={!url}
         onClick={() => setViewing(true)}
-        aria-label={`Открыть ${file.name}`}
+        aria-label={t('file.open', { name: file.name })}
       >
         {url && <img className="size-full object-cover" src={url} alt={file.name} />}
         {busy && (
@@ -159,13 +160,13 @@ export function FileCard({ msg }: { msg: Message }) {
   const busy = file.state === 'loading' || msg.transfer === 'up'
   const bad = file.state === 'gone' || file.state === 'error'
   let status: React.ReactNode
-  if (mine && msg.transfer === 'up') status = 'отправляется…'
-  else if (file.state === 'loading') status = 'скачивается…'
-  else if (file.state === 'gone') status = 'файл больше недоступен'
+  if (mine && msg.transfer === 'up') status = t('file.uploading')
+  else if (file.state === 'loading') status = t('file.downloading')
+  else if (file.state === 'gone') status = t('file.gone')
   else if (file.state === 'error')
     status = (
       <button className="font-semibold underline underline-offset-2" onClick={() => void m.retryDownload(msg.id)}>
-        не скачался — повторить
+        {t('file.retry')}
       </button>
     )
   else status = formatSize(file.size)
@@ -182,7 +183,7 @@ export function FileCard({ msg }: { msg: Message }) {
         className={`relative grid size-11 shrink-0 place-items-center rounded-2xl transition active:scale-90 ${iconBox}`}
         disabled={!ready}
         onClick={() => void saveFile(m, msg)}
-        aria-label={`Сохранить ${file.name}`}
+        aria-label={t('file.saveNamed', { name: file.name })}
       >
         {ready && !busy ? (
           <Download className="size-5" />

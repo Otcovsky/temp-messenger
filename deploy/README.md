@@ -136,8 +136,10 @@ TURN-сервер. Этого достаточно: каждый телефон 
 
 ## Сайт-визитка на tempmessenger.tech
 
-Одна статическая страница (папка `site/`, без скриптов и счётчиков) с описанием и ссылками на чат
-и APK. Раньше корневой домен просто перенаправлял на `chat.`.
+Статическая страница на двух языках (папка `site/`): русская — `/` (`site/index.html`), английская —
+`/en/` (`site/en/index.html`). Разметка и стили у них одинаковые, тексты правятся в обоих файлах.
+Страницы ссылаются друг на друга (`hreflang`, переключатель RU/EN), обе есть в `sitemap.xml`.
+Раньше корневой домен просто перенаправлял на `chat.`.
 
 Обычная выкладка (без sudo) — собирает `site/dist` и копирует в `~/temp-messenger-site`:
 
@@ -166,5 +168,10 @@ sudo nginx -t && sudo systemctl reload nginx
 sudo certbot --nginx -d tempmessenger.tech -d www.tempmessenger.tech
 ```
 
-Когда приложение появится в магазинах, кнопку APK в `site/index.html` (блок `#download` и подвал)
-заменить ссылками на магазины.
+Английской версии нужны блоки `location = /en` и `location = /en/` из `nginx-landing.conf`: без них
+nginx отдаёт на `/en/` ошибку 404. На живом сервере их вписывают в
+`/etc/nginx/sites-available/tempmessenger.tech` вручную (рядом с `location = /download/...`), затем
+`sudo nginx -t && sudo systemctl reload nginx`.
+
+Когда приложение появится в магазинах, кнопку APK в `site/index.html` и `site/en/index.html`
+(блок `#download` и подвал) заменить ссылками на магазины.

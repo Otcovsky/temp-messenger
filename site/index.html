@@ -6,6 +6,9 @@
 <title>Temp Messenger — анонимный мессенджер без регистрации и номера телефона</title>
 <meta name="description" content="Одноразовый мессенджер со сквозным шифрованием: без аккаунта, номера телефона и почты. Переписка, файлы и звонки хранятся только на вашем устройстве. В браузере и на Android.">
 <link rel="canonical" href="https://tempmessenger.tech/">
+<link rel="alternate" hreflang="ru" href="https://tempmessenger.tech/">
+<link rel="alternate" hreflang="en" href="https://tempmessenger.tech/en/">
+<link rel="alternate" hreflang="x-default" href="https://tempmessenger.tech/en/">
 <meta name="robots" content="index, follow, max-image-preview:large">
 <meta name="theme-color" content="#f5f4fb" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0f0d19" media="(prefers-color-scheme: dark)">
@@ -17,6 +20,7 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Temp Messenger">
 <meta property="og:locale" content="ru_RU">
+<meta property="og:locale:alternate" content="en_US">
 <meta property="og:url" content="https://tempmessenger.tech/">
 <meta property="og:title" content="Temp Messenger — мессенджер без регистрации и номера телефона">
 <meta property="og:description" content="Сквозное шифрование, звонки и файлы. Переписка живёт только на вашем устройстве, сервер видит лишь шифротекст.">
@@ -183,6 +187,12 @@ p { margin: 0; }
 @media (min-width: 820px) { .nav { display: flex; } }
 .top .btn { margin-left: auto; padding: 8px 16px; font-size: 15px; min-height: 40px; }
 @media (min-width: 820px) { .top .btn { margin-left: 0; } }
+/* Переключатель языка: в шапке — где хватает места, в подвале — всегда */
+.lang { display: none; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--line); font-size: 14px; font-weight: 650; color: var(--muted); text-decoration: none; }
+.lang:hover { color: var(--text); background: var(--surface-2); }
+@media (min-width: 480px) { .top .lang { display: inline-flex; margin-left: auto; } .top .lang + .btn { margin-left: 0; } }
+@media (min-width: 820px) { .top .lang { margin-left: 0; } }
+footer .lang { display: inline; padding: 0; border: 0; font-size: inherit; font-weight: inherit; }
 
 /* --- кнопки --- */
 .btn {
@@ -355,6 +365,7 @@ footer a:hover { color: var(--text); }
       <a href="#faq">Вопросы</a>
       <a href="#download">Скачать</a>
     </nav>
+    <a class="lang" href="/en/" hreflang="en" lang="en" title="English version">EN</a>
     <a class="btn btn-primary" href="https://chat.tempmessenger.tech/">Открыть чат</a>
   </div>
 </header>
@@ -556,6 +567,7 @@ footer a:hover { color: var(--text); }
       <a href="https://chat.tempmessenger.tech/">Открыть чат</a>
       <a href="/download/temp-messenger.apk" download>Скачать APK</a>
       <a href="#faq">Вопросы</a>
+      <a class="lang" href="/en/" hreflang="en" lang="en">English</a>
     </nav>
   </div>
 </footer>

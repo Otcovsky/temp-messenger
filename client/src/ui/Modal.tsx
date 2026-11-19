@@ -1,5 +1,6 @@
 import { X } from 'lucide-react'
 import { useEffect } from 'react'
+import { t } from '../i18n'
 
 /**
  * Модальное окно. На телефоне — шторка снизу (до неё дотягивается большой палец),
@@ -36,7 +37,7 @@ export function Modal({
         <div className="mx-auto mt-2.5 h-1.5 w-10 shrink-0 rounded-full bg-slate-300 sm:hidden dark:bg-white/15" aria-hidden />
         <header className="flex shrink-0 items-center gap-2 py-2 pr-2 pl-6 sm:pt-4">
           <h2 className="flex-1 truncate text-lg font-bold">{title}</h2>
-          <button className="btn-icon" onClick={onClose} aria-label="Закрыть">
+          <button className="btn-icon" onClick={onClose} aria-label={t('common.close')}>
             <X className="size-5" />
           </button>
         </header>

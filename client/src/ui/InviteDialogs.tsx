@@ -3,6 +3,8 @@ import QRCode from 'qrcode'
 import { useEffect, useMemo, useState } from 'react'
 import { type InvitePayload, type PendingInvite, decodeInvite } from '../crypto/handshake'
 import { shareLinkNative } from '../native'
+import { getLang, t } from '../i18n'
+import { rich } from '../i18n/react'
 import { isNativeApp } from '../platform'
 import { Avatar } from './Avatar'
 import { useLive, useMessenger } from './hooks'
@@ -38,7 +40,7 @@ export function CreateInviteDialog({ onClose }: { onClose: () => void }) {
         .then(setQr)
         .catch((e) => {
           console.error('Не удалось нарисовать QR-код', e)
-          setError(`QR-код не получился (${e instanceof Error ? e.message : e}). Ссылку можно скопировать.`)
+          setError(t('invite.qrFailed', { why: e instanceof Error ? e.message : String(e) }))
         })
   }, [link])
 
@@ -52,13 +54,13 @@ export function CreateInviteDialog({ onClose }: { onClose: () => void }) {
   const canShare = isNativeApp || typeof navigator.share === 'function'
   const share = () =>
     isNativeApp
-      ? shareLinkNative('Приглашение в Temp Messenger', link)
-      : navigator.share({ title: 'Приглашение в Temp Messenger', url: link }).catch(() => {
+      ? shareLinkNative(t('invite.shareTitle'), link)
+      : navigator.share({ title: t('invite.shareTitle'), url: link }).catch(() => {
           /* пользователь закрыл меню */
         })
 
   return (
-    <Modal title="Пригласить собеседника" onClose={onClose}>
+    <Modal title={t('invite.title')} onClose={onClose}>
       {!invite ? (
         <>
           <div className="mb-5 flex flex-col items-center gap-3 pt-2 text-center">
@@ -66,13 +68,12 @@ export function CreateInviteDialog({ onClose }: { onClose: () => void }) {
               <Link2 className="size-8" />
             </div>
             <p className="muted text-sm leading-relaxed">
-              Создайте ссылку и передайте её собеседнику любым способом: лично (QR-код), в другом мессенджере, по
-              почте. Ссылка одноразовая — по ней можно добавить только одного человека.
+              {t('invite.explain')}
             </p>
           </div>
           <button className="btn btn-primary w-full" onClick={create} disabled={busy}>
             {busy ? <Loader2 className="size-5 animate-spin" /> : <Sparkles className="size-5" />}
-            {busy ? 'Создаю…' : 'Создать ссылку'}
+            {busy ? t('invite.creating') : t('invite.create')}
           </button>
           {error && <p className="note note-error mt-3">{error}</p>}
         </>
@@ -80,7 +81,7 @@ export function CreateInviteDialog({ onClose }: { onClose: () => void }) {
         <div className="flex flex-col items-center gap-4">
           {qr && (
             <div className="rounded-[28px] bg-brand p-1.5 shadow-xl shadow-violet-500/25">
-              <img className="block rounded-[22px] bg-white p-2" src={qr} alt="QR-код приглашения" width={232} height={232} />
+              <img className="block rounded-[22px] bg-white p-2" src={qr} alt={t('invite.qrAlt')} width={232} height={232} />
             </div>
           )}
           {error && <p className="note note-error w-full">{error}</p>}
@@ -93,24 +94,23 @@ export function CreateInviteDialog({ onClose }: { onClose: () => void }) {
           <div className={`grid w-full gap-2.5 ${canShare ? 'grid-cols-2' : ''}`}>
             <button className={`btn ${canShare ? 'btn-soft' : 'btn-primary'}`} onClick={copy}>
               {copied ? <Check className="size-5" /> : <Copy className="size-5" />}
-              {copied ? 'Скопировано' : 'Копировать'}
+              {copied ? t('invite.copied') : t('invite.copy')}
             </button>
             {canShare && (
               <button className="btn btn-primary" onClick={share}>
-                <Share2 className="size-5" /> Поделиться
+                <Share2 className="size-5" /> {t('invite.share')}
               </button>
             )}
           </div>
           <p className="muted text-center text-sm leading-relaxed">
-            Чат появится, когда собеседник откроет ссылку. Действует 30 дней. Код безопасности потом можно сверить в
-            окне чата.
+            {t('invite.after')}
           </p>
         </div>
       )}
 
       {!!pending?.length && (
         <div className="mt-6">
-          <h3 className="section-title">Ожидают ответа</h3>
+          <h3 className="section-title">{t('invite.pending')}</h3>
           <ul className="grid gap-1.5">
             {pending.map((p) => (
               <li
@@ -118,10 +118,10 @@ export function CreateInviteDialog({ onClose }: { onClose: () => void }) {
                 className="flex items-center justify-between gap-3 rounded-2xl bg-slate-900/[0.03] py-1.5 pr-1.5 pl-4 text-sm dark:bg-white/[0.04]"
               >
                 <span className="muted">
-                  {new Date(p.createdAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
+                  {new Date(p.createdAt).toLocaleString(getLang(), { dateStyle: 'short', timeStyle: 'short' })}
                 </span>
                 <button className="btn btn-sm btn-danger" onClick={() => m.cancelInvite(p.mailbox)}>
-                  <X className="size-4" /> Отозвать
+                  <X className="size-4" /> {t('invite.revoke')}
                 </button>
               </li>
             ))}
@@ -146,7 +146,7 @@ export function JoinDialog({ onClose }: { onClose: () => void }) {
       location.hash = `i=${code}` // App подхватит через hashchange
       onClose()
     } catch {
-      setPasteError('Это не похоже на ссылку-приглашение')
+      setPasteError(t('join.notInvite'))
     }
   }
 
@@ -158,7 +158,7 @@ export function JoinDialog({ onClose }: { onClose: () => void }) {
         openCode(t)
       }
     } catch {
-      setPasteError('Браузер не дал прочитать буфер обмена — вставьте ссылку в поле вручную')
+      setPasteError(t('join.noClipboard'))
     }
   }
 
@@ -175,16 +175,16 @@ export function JoinDialog({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Modal title="Присоединиться к чату" onClose={onClose}>
+    <Modal title={t('join.title')} onClose={onClose}>
       <p className="muted mb-5 text-sm leading-relaxed">
-        Откройте ссылку-приглашение, которую вам прислал собеседник, или отсканируйте его QR-код.
+        {t('join.explain')}
       </p>
       <button className="btn btn-primary mb-5 h-14 w-full text-base" onClick={() => setScanning(true)}>
-        <ScanQrCode className="size-6" /> Сканировать QR-код
+        <ScanQrCode className="size-6" /> {t('join.scan')}
       </button>
       <div className="muted mb-5 flex items-center gap-3 text-xs font-semibold tracking-wider uppercase">
         <span className="h-px flex-1 bg-slate-200 dark:bg-white/10" />
-        или ссылкой
+        {t('join.orLink')}
         <span className="h-px flex-1 bg-slate-200 dark:bg-white/10" />
       </div>
       <form
@@ -201,15 +201,15 @@ export function JoinDialog({ onClose }: { onClose: () => void }) {
             setPasted(e.target.value)
             setPasteError('')
           }}
-          placeholder="Ссылка-приглашение"
+          placeholder={t('join.placeholder')}
         />
         {pasted.trim() ? (
           <button type="submit" className="btn btn-soft shrink-0">
-            Открыть
+            {t('join.open')}
           </button>
         ) : (
           typeof navigator.clipboard?.readText === 'function' && (
-            <button type="button" className="btn btn-soft shrink-0 px-4" onClick={paste} aria-label="Вставить из буфера">
+            <button type="button" className="btn btn-soft shrink-0 px-4" onClick={paste} aria-label={t('join.paste')}>
               <ClipboardPaste className="size-5" />
             </button>
           )
@@ -271,18 +271,18 @@ export function AcceptInviteDialog({
   }
 
   return (
-    <Modal title="Приглашение в чат" onClose={onClose}>
+    <Modal title={t('accept.title')} onClose={onClose}>
       {!invite ? (
-        <p className="note note-error">Ссылка повреждена или неполная.</p>
+        <p className="note note-error">{t('accept.broken')}</p>
       ) : problem === null ? (
         <p className="muted flex items-center justify-center gap-2 py-8">
-          <Loader2 className="size-5 animate-spin" /> Проверяю приглашение…
+          <Loader2 className="size-5 animate-spin" /> {t('accept.checking')}
         </p>
       ) : problem ? (
         <>
           <p className="note note-error mb-4">{problem}</p>
           <button className="btn btn-soft w-full" onClick={onClose}>
-            Закрыть
+            {t('common.close')}
           </button>
         </>
       ) : (
@@ -290,21 +290,20 @@ export function AcceptInviteDialog({
           <div className="mb-5 flex flex-col items-center gap-2 pt-2 text-center">
             <Avatar name={invite.n || '?'} size="xl" />
             <p className="mt-2 text-lg">
-              <b>{invite.n || 'Без имени'}</b> приглашает вас
-              <br />в зашифрованный чат
+              {rich('accept.invites', { name: <b>{invite.n || t('common.noName')}</b> })}
             </p>
             <p className="muted text-sm leading-relaxed">
-              Имя указал сам пригласивший. Убедиться, что это он, можно сверив код безопасности.
+              {t('accept.nameNote')}
             </p>
           </div>
           {error && <p className="note note-error mb-4">{error}</p>}
           <div className="grid grid-cols-2 gap-2.5">
             <button className="btn btn-soft" onClick={onClose}>
-              Отклонить
+              {t('accept.decline')}
             </button>
             <button className="btn btn-primary" onClick={accept} disabled={busy}>
               {busy && <Loader2 className="size-5 animate-spin" />}
-              {busy ? 'Подключаю…' : 'Принять'}
+              {busy ? t('accept.connecting') : t('accept.accept')}
             </button>
           </div>
         </>

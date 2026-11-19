@@ -1,0 +1,12 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="notify_message">Новое сообщение</string>
+    <string name="notify_call">Входящий звонок</string>
+    <string name="notify_call_body">Нажмите, чтобы ответить</string>
+    <string name="notify_missed">Пропущенный звонок</string>
+    <string name="channel_messages">Сообщения</string>
+    <string name="channel_messages_desc">Новые сообщения</string>
+    <string name="channel_calls">Входящие звонки</string>
+    <string name="channel_calls_desc">Звонок с мелодией, пока не ответите</string>
+    <string name="channel_missed">Пропущенные звонки</string>
+</resources>
