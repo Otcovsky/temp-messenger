@@ -185,13 +185,21 @@ p { margin: 0; }
 .nav a { text-decoration: none; color: var(--muted); }
 .nav a:hover { color: var(--text); }
 @media (min-width: 820px) { .nav { display: flex; } }
-.top .btn { margin-left: auto; padding: 8px 16px; font-size: 15px; min-height: 40px; }
-@media (min-width: 820px) { .top .btn { margin-left: 0; } }
-/* Переключатель языка: в шапке — где хватает места, в подвале — всегда */
-.lang { display: none; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--line); font-size: 14px; font-weight: 650; color: var(--muted); text-decoration: none; }
+.top .btn { padding: 8px 16px; font-size: 15px; min-height: 40px; }
+/* Переключатель языка — в шапке на любой ширине и в подвале */
+.lang { display: inline-flex; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--line); font-size: 14px; font-weight: 650; color: var(--muted); text-decoration: none; }
 .lang:hover { color: var(--text); background: var(--surface-2); }
-@media (min-width: 480px) { .top .lang { display: inline-flex; margin-left: auto; } .top .lang + .btn { margin-left: 0; } }
+.top .lang { margin-left: auto; }
 @media (min-width: 820px) { .top .lang { margin-left: 0; } }
+/* На узком телефоне кнопка чата короче, чтобы в шапку влез переключатель языка */
+.top .btn .short { display: none; }
+@media (max-width: 479px) {
+  .top .wrap { gap: 12px; }
+  .top .btn { padding: 8px 14px; }
+  .top .btn .long { display: none; }
+  .top .btn .short { display: inline; }
+}
+@media (max-width: 340px) { .logo { font-size: 15px; gap: 8px; } }
 footer .lang { display: inline; padding: 0; border: 0; font-size: inherit; font-weight: inherit; }
 
 /* --- кнопки --- */
@@ -366,7 +374,7 @@ footer a:hover { color: var(--text); }
       <a href="#download">Скачать</a>
     </nav>
     <a class="lang" href="/en/" hreflang="en" lang="en" title="English version">EN</a>
-    <a class="btn btn-primary" href="https://chat.tempmessenger.tech/">Открыть чат</a>
+    <a class="btn btn-primary" href="https://chat.tempmessenger.tech/"><span class="long">Открыть чат</span><span class="short">Чат</span></a>
   </div>
 </header>
 
