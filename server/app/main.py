@@ -49,8 +49,9 @@ from .store import RegisterResult, Store, message_cost
 log = logging.getLogger("temp_messenger")
 
 AUTH_CONTEXT = b"tm-auth-v1:"
-MAILBOX_RE = re.compile(r"^[A-Za-z0-9_-]{22}$")  # 16 байт в base64url
-MSG_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+# Проверять только fullmatch: у match с `$` в конце проходит строка с переводом строки
+MAILBOX_RE = re.compile(r"[A-Za-z0-9_-]{22}")  # 16 байт в base64url
+MSG_ID_RE = re.compile(r"[A-Za-z0-9_-]{8,64}")
 MAX_ACK_IDS = 500
 
 
@@ -315,7 +316,7 @@ def create_app(
 
         elif t == "send":
             msg_id = frame.get("id")
-            if not isinstance(msg_id, str) or not MSG_ID_RE.match(msg_id):
+            if not isinstance(msg_id, str) or not MSG_ID_RE.fullmatch(msg_id):
                 raise ProtocolError("bad_id")
             to = frame.get("to")
             if not isinstance(to, list) or not 1 <= len(to) <= cfg.max_recipients:
@@ -339,7 +340,7 @@ def create_app(
             cost = message_cost(len(payload.encode()))
             failed = []
             for raw in dict.fromkeys(to):  # без дублей, порядок сохраняется
-                if not isinstance(raw, str) or not MAILBOX_RE.match(raw):
+                if not isinstance(raw, str) or not MAILBOX_RE.fullmatch(raw):
                     failed.append({"to": raw, "reason": "bad_mailbox"})
                     continue
                 if not budget.allows(conn.ip, cost):
@@ -425,7 +426,7 @@ def create_app(
 
 
 def _mailbox(value) -> str:
-    if not isinstance(value, str) or not MAILBOX_RE.match(value):
+    if not isinstance(value, str) or not MAILBOX_RE.fullmatch(value):
         raise ProtocolError("bad_mailbox")
     return value
 

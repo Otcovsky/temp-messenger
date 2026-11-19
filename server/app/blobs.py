@@ -30,7 +30,7 @@ from .store import Store, blob_cost
 log = logging.getLogger("temp_messenger")
 
 BLOB_CONTEXT = b"tm-blob-v1:"
-BLOB_ID_RE = re.compile(r"^[A-Za-z0-9_-]{22}$")  # 16 байт в base64url
+BLOB_ID_RE = re.compile(r"[A-Za-z0-9_-]{22}")  # 16 байт в base64url; проверять только fullmatch
 
 
 class BlobFiles:
@@ -103,7 +103,7 @@ def add_blob_routes(app: FastAPI, cfg: Settings) -> None:
 
     @app.put("/blob/{blob_id}")
     async def put_blob(blob_id: str, request: Request):
-        if not BLOB_ID_RE.match(blob_id):
+        if not BLOB_ID_RE.fullmatch(blob_id):
             return _error(404, "bad_id")
         try:
             size = int(request.headers["content-length"])
@@ -170,7 +170,7 @@ def add_blob_routes(app: FastAPI, cfg: Settings) -> None:
 
     @app.get("/blob/{blob_id}")
     async def get_blob(blob_id: str):
-        if not BLOB_ID_RE.match(blob_id) or not store().blob_available(blob_id):
+        if not BLOB_ID_RE.fullmatch(blob_id) or not store().blob_available(blob_id):
             return _error(404, "not_found")
         path = files().path(blob_id)
         if not path.is_file():
@@ -179,7 +179,7 @@ def add_blob_routes(app: FastAPI, cfg: Settings) -> None:
 
     @app.post("/blob/{blob_id}/done")
     async def blob_done(blob_id: str):
-        if BLOB_ID_RE.match(blob_id) and store().blob_done(blob_id):
+        if BLOB_ID_RE.fullmatch(blob_id) and store().blob_done(blob_id):
             files().remove(blob_id)
             ledger().release(blob_id)
         return Response(status_code=204)

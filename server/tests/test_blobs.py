@@ -76,6 +76,16 @@ def test_upload_requires_valid_signature(client):
     assert client.get(f"/blob/{bid}").status_code == 404
 
 
+
+def test_blob_id_with_trailing_newline_rejected(client, cfg):
+    # В Python `$` пропускает перевод строки в конце: проверка ID должна быть fullmatch
+    key = Ed25519PrivateKey.generate()
+    bid = blob_id() + "\n"
+    r = client.put(f"/blob/{bid[:-1]}%0A?n=1", content=b"x", headers=auth(key, bid, 1))
+    assert r.status_code == 404
+    assert client.get(f"/blob/{bid[:-1]}%0A").status_code == 404
+    assert not os.path.isdir(cfg.blob_dir) or os.listdir(cfg.blob_dir) == []
+
 def test_limits(client):
     key = Ed25519PrivateKey.generate()
     assert put(client, key, blob_id(), b"x" * 1001).status_code == 413

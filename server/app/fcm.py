@@ -30,7 +30,7 @@ log = logging.getLogger("temp_messenger.fcm")
 # Подписка приложения хранится там же, где подписки браузеров: endpoint = "fcm:<токен>",
 # auth = ключ шифрования пометки (base64url, 32 байта)
 FCM_PREFIX = "fcm:"
-TOKEN_RE = re.compile(r"^[A-Za-z0-9_:\-]{20,1000}$")
+TOKEN_RE = re.compile(r"[A-Za-z0-9_:\-]{20,1000}")  # проверять только fullmatch
 KEY_BYTES = 32
 
 SCOPE = "https://www.googleapis.com/auth/firebase.messaging"
@@ -50,7 +50,7 @@ def _unb64(s: str) -> bytes:
 
 
 def token_valid(token) -> bool:
-    return isinstance(token, str) and TOKEN_RE.match(token) is not None
+    return isinstance(token, str) and TOKEN_RE.fullmatch(token) is not None
 
 
 def key_valid(key) -> bool:

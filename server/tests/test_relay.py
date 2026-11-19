@@ -183,6 +183,18 @@ def test_short_ttl_message_expires(tmp_path):
     assert [m.id for m in s.pending("a" * 22, now=1061)] == ["text"]
 
 
+
+def test_ids_with_trailing_newline_rejected(client):
+    # В Python `$` пропускает перевод строки в конце: проверки должны быть fullmatch
+    alice, _ = connect(client)
+    alice.send_json({"t": "register", "mailbox": mailbox() + "\n"})
+    assert alice.receive_json()["code"] == "bad_mailbox"
+    mb = mailbox()
+    alice.send_json({"t": "register", "mailbox": mb})
+    alice.receive_json()
+    alice.send_json({"t": "send", "id": "msg-00000010\n", "to": [mb], "payload": "p"})
+    assert alice.receive_json()["code"] == "bad_id"
+
 def test_send_rejects_bad_ttl(client):
     alice, _ = connect(client)
     mb = mailbox()
