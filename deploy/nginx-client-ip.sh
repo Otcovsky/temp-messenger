@@ -7,7 +7,7 @@
 # Повторный запуск ничего не меняет. Перед правкой — копия; если nginx -t не проходит, она возвращается.
 set -euo pipefail
 
-F="${1:-/etc/nginx/sites-available/chat.smartenergypro.tech}"
+F="${1:-/etc/nginx/sites-available/chat.tempmessenger.tech}"
 LINE='        proxy_set_header X-Forwarded-For $remote_addr;  # адрес клиента для квот (quota.py)'
 
 if grep -q 'X-Forwarded-For \$remote_addr' "$F"; then

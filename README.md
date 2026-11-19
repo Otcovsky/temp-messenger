@@ -73,7 +73,9 @@ npm run apk        # → android/app/build/outputs/apk/release/app-release.apk
 «Вышла версия …» со ссылкой на APK (`client/src/appUpdate.ts`). Файл пишет `site/build.sh`, так что
 предложение обновиться появляется после выкладки сайта с новым APK. Проверка есть в APK новее 0.3.0;
 у кого 0.3.0 и раньше, тем нужно один раз обновиться вручную, с сайта.
-Значки: `node client/scripts/make-icons.mjs`. Пока без уведомлений (FCM — следующий этап).
+Значки: `node client/scripts/make-icons.mjs`. Уведомления в приложении идут через Firebase Cloud Messaging:
+для сборки нужен свой `client/android/app/google-services.json` (его нет в репозитории), серверу — ключ
+сервисного аккаунта в `TM_FCM_CREDENTIALS`.
 
 ## Выкладка
 
@@ -86,3 +88,17 @@ npm run apk        # → android/app/build/outputs/apk/release/app-release.apk
 (до 50 человек; каждое сообщение шифруется отдельно для каждого участника), пуш-уведомления (о сообщении —
 пустые, без текста и отправителя) и звонки один на один со звуком и видео: сигналы идут шифрованными
 сообщениями, звук и видео — через TURN-сервер, чтобы собеседник не видел IP-адрес.
+
+## Отзывы, ошибки, уязвимости
+
+Это ранняя бета, независимого аудита безопасности ещё не было.
+
+- Ошибки и предложения — [Issues](https://github.com/Otcovsky/temp-messenger/issues), идеи и вопросы —
+  [Discussions](https://github.com/Otcovsky/temp-messenger/discussions), или на почту feedback@tempmessenger.tech.
+- Уязвимости — не в открытые Issues, а как описано в [SECURITY.md](SECURITY.md).
+
+## Лицензия
+
+[GNU AGPL v3](LICENSE). Коротко: код можно читать, менять и запускать у себя, но если вы даёте людям
+пользоваться изменённой версией (в том числе через свой сервер), её исходный код тоже нужно открыть
+по этой же лицензии.

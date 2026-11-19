@@ -1,20 +1,23 @@
-# Выкладка на тестовый сервер
+# Выкладка на сервер
 
-Адрес: `https://chat.smartenergypro.tech`. Ретранслятор слушает `127.0.0.1:8100`, nginx отдаёт статику клиента и проксирует `/ws`.
+Рабочий сервер: `https://chat.tempmessenger.tech` (Ubuntu 24.04, пользователь `ubuntu`). Ретранслятор
+слушает `127.0.0.1:8100`, nginx отдаёт статику клиента и проксирует `/ws`. Для своего сервера замените
+домен в `nginx-site.conf` и `temp-messenger.service`, а путь `/home/ubuntu` — на домашний каталог своего пользователя.
 
 ## Разовая настройка (нужен sudo)
 
-1. **DNS:** A-запись `chat.smartenergypro.tech` → `79.135.198.116`.
+1. **DNS:** A-запись `chat.<ваш домен>` → внешний IP сервера.
 2. **Сервис без входа в систему** (пользовательский systemd должен работать постоянно):
    ```bash
-   sudo loginctl enable-linger otche
+   sudo loginctl enable-linger $USER
    ```
+   nginx должен читать клиент из домашнего каталога: `chmod 711 ~`.
 3. **nginx и сертификат** (после того как DNS-запись заработала):
    ```bash
-   sudo cp ~/temp-messenger/deploy/nginx-site.conf /etc/nginx/sites-available/chat.smartenergypro.tech
-   sudo ln -s /etc/nginx/sites-available/chat.smartenergypro.tech /etc/nginx/sites-enabled/
+   sudo cp ~/temp-messenger/deploy/nginx-site.conf /etc/nginx/sites-available/chat.tempmessenger.tech
+   sudo ln -s /etc/nginx/sites-available/chat.tempmessenger.tech /etc/nginx/sites-enabled/
    sudo nginx -t && sudo systemctl reload nginx
-   sudo certbot --nginx -d chat.smartenergypro.tech
+   sudo certbot --nginx -d chat.tempmessenger.tech
    ```
 
 ## Обычная выкладка (без sudo)
@@ -22,11 +25,14 @@
 Из корня репозитория на машине разработчика:
 
 ```bash
-bash deploy/deploy.sh
+bash deploy/deploy.sh                          # сервер по умолчанию — SSH-алиас oracle-comments
+DEPLOY_HOST=user@host bash deploy/deploy.sh    # другой сервер
 ```
 
 Скрипт собирает клиент, копирует его и сервер по SSH в `~/temp-messenger`, обновляет зависимости и
-перезапускает `systemctl --user restart temp-messenger`.
+перезапускает `systemctl --user restart temp-messenger`. Юнит при этом перезаписывается, поэтому
+настройки конкретного сервера (например, `TM_PUSH_SUBJECT`) удобнее держать в drop-in
+`~/.config/systemd/user/temp-messenger.service.d/*.conf`.
 
 Полезное на сервере:
 
@@ -119,14 +125,14 @@ sudo bash ~/temp-messenger/deploy/calls-setup.sh
 Он правит nginx, ставит coturn с конфигом `/etc/turnserver.conf`, записывает адреса и общий секрет
 в `~/temp-messenger/data/relay.env` и перезапускает ретранслятор.
 
-После этого **на роутере** нужно пробросить на сервер порт **3478, UDP и TCP** — вход на
-TURN-сервер. Этого достаточно: каждый телефон общается с сервером только через 3478, а потоки двух
+После этого снаружи должен быть открыт порт **3478, UDP и TCP** — вход на TURN-сервер: в облаке это
+правило файрвола (в Oracle Cloud — и iptables на машине, и security list в консоли), дома — проброс
+на роутере. Этого достаточно: каждый телефон общается с сервером только через 3478, а потоки двух
 собеседников встречаются уже внутри него.
 
-Диапазон 49160–49200 UDP (порты, на которых coturn держит потоки) пробрасывать не обязательно. Он
+Диапазон 49160–49200 UDP (порты, на которых coturn держит потоки) открывать не обязательно. Он
 нужен лишь для короткого пути, когда один собеседник соединяется напрямую, а второй — через сервер;
-без проброса такой звонок просто пойдёт через сервер с обеих сторон. Если роутер умеет
-пробрасывать только по одному порту, диапазон можно не трогать.
+без него такой звонок просто пойдёт через сервер с обеих сторон.
 
 Проверка: `systemctl status coturn`, журнал — `journalctl -u coturn -f` (в нём видны IP-адреса
 звонящих; когда всё заработает, журнал coturn стоит выключить строкой `no-stdout-log` и `log-file=/dev/null`).

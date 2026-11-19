@@ -5,7 +5,7 @@
 # Перед правкой делает копию; если nginx -t не проходит, возвращает её.
 set -euo pipefail
 
-F="${1:-/etc/nginx/sites-available/chat.smartenergypro.tech}"
+F="${1:-/etc/nginx/sites-available/chat.tempmessenger.tech}"
 BACKUP="/root/$(basename "$F").bak-$(date +%Y%m%d-%H%M%S)"
 cp "$F" "$BACKUP"
 echo "Копия: $BACKUP"

@@ -1,6 +1,6 @@
 # Пользовательский systemd-сервис: ~/.config/systemd/user/temp-messenger.service
 # Перезапуск без sudo: systemctl --user restart temp-messenger
-# Чтобы работал без входа пользователя, один раз: sudo loginctl enable-linger otche
+# Чтобы работал без входа пользователя, один раз: sudo loginctl enable-linger $USER
 [Unit]
 Description=Temp Messenger relay
 After=network.target
@@ -10,7 +10,7 @@ WorkingDirectory=%h/temp-messenger/server
 Environment=TM_DB_PATH=%h/temp-messenger/data/relay.sqlite3
 Environment=TM_BLOB_DIR=%h/temp-messenger/data/blobs
 # Включает пуш-уведомления: контакт владельца сервера для пуш-сервисов (адрес сайта или mailto:)
-Environment=TM_PUSH_SUBJECT=https://chat.smartenergypro.tech
+Environment=TM_PUSH_SUBJECT=https://chat.tempmessenger.tech
 # Адреса TURN и секрет для звонков; файл создаёт deploy/calls-setup.sh (без него звонки — только напрямую)
 EnvironmentFile=-%h/temp-messenger/data/relay.env
 ExecStart=%h/temp-messenger/server/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8100 --ws-max-size 131072 --no-access-log

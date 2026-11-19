@@ -10,13 +10,13 @@
 #      и перезапускает ретранслятор, чтобы он начал выдавать клиентам временные логины.
 #
 # Повторный запуск безопасен: секрет сохраняется, конфиги переписываются теми же значениями.
-# На роутере после этого нужно пробросить на этот сервер порт 3478 (UDP и TCP).
+# После этого порт 3478 (UDP и TCP) должен быть открыт снаружи: проброс на роутере или правило файрвола облака.
 # Диапазон RELAY_MIN–RELAY_MAX (UDP) пробрасывать не обязательно: см. deploy/README.md.
 set -euo pipefail
 
-DOMAIN="${DOMAIN:-chat.smartenergypro.tech}"
+DOMAIN="${DOMAIN:-chat.tempmessenger.tech}"
 NGINX_CONF="${NGINX_CONF:-/etc/nginx/sites-available/$DOMAIN}"
-RUN_USER="${SUDO_USER:-otche}"
+RUN_USER="${SUDO_USER:?Запустите через sudo от пользователя, под которым работает ретранслятор}"
 APP_DIR="$(getent passwd "$RUN_USER" | cut -d: -f6)/temp-messenger"
 ENV_FILE="$APP_DIR/data/relay.env"
 RELAY_MIN="${RELAY_MIN:-49160}"
@@ -60,7 +60,7 @@ listening-port=3478
 realm=$DOMAIN
 fingerprint
 
-# Сервер за роутером: наружу виден PUBLIC, сам он знает себя как LAN
+# Сервер за NAT (роутер, облако): наружу виден PUBLIC, сам он знает себя как LAN
 external-ip=$PUBLIC_IP/$LAN_IP
 min-port=$RELAY_MIN
 max-port=$RELAY_MAX
@@ -127,6 +127,6 @@ fi
 
 cat <<EOF
 
-Готово. Осталось на роутере пробросить на $LAN_IP порт 3478, UDP и TCP.
+Готово. Осталось открыть снаружи порт 3478, UDP и TCP (проброс на $LAN_IP на роутере или правило файрвола облака).
 Диапазон $RELAY_MIN–$RELAY_MAX (UDP) — по желанию: без него звонки идут через сервер с обеих сторон.
 EOF

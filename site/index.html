@@ -75,6 +75,11 @@
         },
         {
           "@type": "Question",
+          "name": "Как проверить, что сервер не читает переписку?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Код мессенджера открыт: приложение, сервер и описание протокола лежат на GitHub. Сообщения шифруются на вашем устройстве, и на сервер уходит уже шифротекст — это видно по коду. Независимого аудита пока не было." }
+        },
+        {
+          "@type": "Question",
           "name": "Где хранится переписка?",
           "acceptedAnswer": { "@type": "Answer", "text": "Только на вашем устройстве: в хранилище браузера или в памяти приложения. Резервных копий на сервере нет." }
         },
@@ -330,6 +335,14 @@ section { scroll-margin-top: 72px; }
 .meta { margin-top: 12px; font-size: 13px; color: var(--muted); text-align: center; overflow-wrap: anywhere; }
 .meta code { font: 12px/1.5 ui-monospace, 'SF Mono', Consolas, monospace; }
 
+/* --- открытый код --- */
+.open .card { display: flex; flex-direction: column; }
+.open .card > p:not(.meta) { flex: 1; }
+.links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
+.links .btn { flex: 1 1 100%; white-space: normal; text-align: center; overflow-wrap: anywhere; }
+.meta a { color: inherit; }
+.meta a:hover { color: var(--text); }
+
 footer { border-top: 1px solid var(--line); padding: 28px 0 calc(28px + env(safe-area-inset-bottom)); font-size: 14px; color: var(--muted); }
 footer .wrap { display: flex; flex-wrap: wrap; gap: 10px 24px; justify-content: space-between; align-items: center; }
 footer nav { display: flex; flex-wrap: wrap; gap: 8px 20px; }
@@ -355,6 +368,10 @@ footer a:hover { color: var(--text); }
   <symbol id="i-android" viewBox="0 0 24 24"><rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 18h.01"/></symbol>
   <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></symbol>
+  <symbol id="i-mail" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></symbol>
+  <symbol id="i-message" viewBox="0 0 24 24"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></symbol>
+  <symbol id="i-bug" viewBox="0 0 24 24"><path d="m8 2 1.88 1.88"/><path d="M14.12 3.88 16 2"/><path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"/><path d="M12 20v-9"/><path d="M6.53 9C4.6 8.8 3 7.1 3 5"/><path d="M6 13H2"/><path d="M3 21c0-2.1 1.7-3.9 3.8-4"/><path d="M20.97 5c0 2.1-1.6 3.8-3.5 4"/><path d="M22 13h-4"/><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"/></symbol>
   <symbol id="i-file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></symbol>
 </svg>
 
@@ -496,6 +513,38 @@ footer a:hover { color: var(--text); }
     </div>
   </section>
 
+  <section class="sec open" id="open" aria-labelledby="open-h">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="eyebrow">Открытый код</div>
+        <h2 id="open-h">Не верьте на слово — проверьте</h2>
+        <p>Весь код Temp Messenger открыт: приложение, сервер и описание протокола шифрования. Любой может посмотреть, что происходит с сообщениями, и убедиться, что сервер их не читает.</p>
+      </div>
+      <div class="grid">
+        <article class="card">
+          <div class="ic"><svg class="icon"><use href="#i-code"/></svg></div>
+          <h3>Исходный код на GitHub</h3>
+          <p>Браузерная версия, сервер, Android-приложение и описание протокола. Лицензия GNU AGPL v3: изменённую версию, которой пользуются другие люди, тоже нужно открыть.</p>
+          <div class="links">
+            <a class="btn btn-primary" href="https://github.com/Otcovsky/temp-messenger">Открыть репозиторий<svg class="icon"><use href="#i-arrow"/></svg></a>
+          </div>
+          <p class="meta">GNU AGPL v3 · github.com/Otcovsky/temp-messenger</p>
+        </article>
+        <article class="card">
+          <div class="ic"><svg class="icon"><use href="#i-message"/></svg></div>
+          <h3>Отзывы и предложения</h3>
+          <p>Нашли ошибку, не хватает функции или есть идея, как сделать лучше? Напишите: мессенджер в ранней бете, и сейчас самое время повлиять на то, каким он станет.</p>
+          <div class="links">
+            <a class="btn btn-soft" href="https://github.com/Otcovsky/temp-messenger/issues"><svg class="icon"><use href="#i-bug"/></svg>Сообщить об ошибке</a>
+            <a class="btn btn-soft" href="https://github.com/Otcovsky/temp-messenger/discussions"><svg class="icon"><use href="#i-message"/></svg>Идеи и вопросы</a>
+            <a class="btn btn-soft" href="mailto:feedback@tempmessenger.tech"><svg class="icon"><use href="#i-mail"/></svg>feedback@tempmessenger.tech</a>
+          </div>
+          <p class="meta">Нашли уязвимость? Пожалуйста, не публикуйте её открыто — <a href="https://github.com/Otcovsky/temp-messenger/security">как сообщить</a></p>
+        </article>
+      </div>
+    </div>
+  </section>
+
   <section class="sec alt" id="faq" aria-labelledby="faq-h">
     <div class="wrap">
       <div class="sec-head">
@@ -510,6 +559,10 @@ footer a:hover { color: var(--text); }
         <details>
           <summary>Что видит сервер?<svg class="icon"><use href="#i-chevron"/></svg></summary>
           <p>Только зашифрованные пакеты, адресованные случайным почтовым ящикам. Текст, имена, файлы и отправителя он не видит. Недоставленное хранится до 7 дней и удаляется сразу после получения. Журналы посещений с IP-адресами не ведутся.</p>
+        </details>
+        <details>
+          <summary>Как проверить, что сервер не читает переписку?<svg class="icon"><use href="#i-chevron"/></svg></summary>
+          <p>Код мессенджера открыт: приложение, сервер и описание протокола лежат на GitHub. Сообщения шифруются на вашем устройстве, и на сервер уходит уже шифротекст — это видно по коду. Независимого аудита пока не было. <a href="https://github.com/Otcovsky/temp-messenger">github.com/Otcovsky/temp-messenger</a></p>
         </details>
         <details>
           <summary>Где хранится переписка?<svg class="icon"><use href="#i-chevron"/></svg></summary>
@@ -575,6 +628,8 @@ footer a:hover { color: var(--text); }
       <a href="https://chat.tempmessenger.tech/">Открыть чат</a>
       <a href="/download/temp-messenger.apk" download>Скачать APK</a>
       <a href="#faq">Вопросы</a>
+      <a href="https://github.com/Otcovsky/temp-messenger">Исходный код</a>
+      <a href="mailto:feedback@tempmessenger.tech">Написать нам</a>
       <a class="lang" href="/en" hreflang="en" lang="en">English</a>
     </nav>
   </div>

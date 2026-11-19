@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Сборка клиента и выкладка клиента и сервера на тестовый сервер.
+# Сборка клиента и выкладка клиента и сервера на сервер (по умолчанию — SSH-алиас oracle-comments).
 # Запуск из корня репозитория: bash deploy/deploy.sh
 # Нужен SSH-доступ по ключу. sudo не требуется (после первичной настройки, см. deploy/README.md).
 set -euo pipefail
 
-HOST="${DEPLOY_HOST:-otche@192.168.0.107}"
+HOST="${DEPLOY_HOST:-oracle-comments}"
 REMOTE="${DEPLOY_DIR:-temp-messenger}"   # относительно домашнего каталога
 
 cd "$(dirname "$0")/.."
