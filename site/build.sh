@@ -74,7 +74,7 @@ page site/index.html "$SIZE" "$CERT" > "$OUT/index.html"
 page site/en/index.html "$SIZE_EN" "$CERT_EN" > "$OUT/en/index.html"
 page site/uk/index.html "$SIZE_UK" "$CERT_UK" > "$OUT/uk/index.html"
 sed -e "s|__LASTMOD__|$(date -u +%F)|" site/sitemap.xml > "$OUT/sitemap.xml"
-cp site/404.html site/robots.txt site/og.png "$OUT/"
+cp site/404.html site/robots.txt site/og.png site/lang.js "$OUT/"
 cp client/public/favicon-32.png client/public/apple-touch-icon.png client/public/icon-192.png "$OUT/"
 cp "$APK" "$OUT/download/temp-messenger.apk"
 # Приложение сверяет с этим файлом свою версию (client/src/appUpdate.ts). Ссылки здесь нет

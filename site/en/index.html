@@ -193,29 +193,36 @@ p { margin: 0; }
 .nav a:hover { color: var(--text); }
 @media (min-width: 960px) { .nav { display: flex; } }
 .top .btn { padding: 8px 16px; font-size: 15px; min-height: 40px; }
-/* Переключатель языка — в шапке на любой ширине и в подвале */
-.lang { display: inline-flex; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--line); font-size: 14px; font-weight: 650; color: var(--muted); text-decoration: none; }
-.lang:hover { color: var(--text); background: var(--surface-2); }
-.langs { display: inline-flex; gap: 6px; }
-.top .langs { margin-left: auto; }
-@media (min-width: 960px) { .top .langs { margin-left: 0; } }
+/* Переключатель языка: в шапке — выпадающее меню (на любой ширине), в подвале — обычные ссылки */
+.lang-menu { position: relative; margin-left: auto; }
+@media (min-width: 960px) { .lang-menu { margin-left: 0; } }
+.lang-menu summary { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--line); font-size: 14px; font-weight: 650; color: var(--muted); cursor: pointer; list-style: none; user-select: none; -webkit-user-select: none; }
+.lang-menu summary::-webkit-details-marker { display: none; }
+.lang-menu summary:hover, .lang-menu[open] summary { color: var(--text); background: var(--surface-2); }
+.lang-menu summary .icon { width: 18px; height: 18px; }
+.lang-menu summary .chev { width: 16px; height: 16px; transition: transform .15s; }
+.lang-menu[open] summary .chev { transform: rotate(180deg); }
+.lang-list { position: absolute; right: 0; top: calc(100% + 6px); z-index: 6; min-width: 180px; margin: 0; padding: 6px; list-style: none; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
+.lang-list a { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 12px; border-radius: 8px; font-size: 15px; color: var(--text); text-decoration: none; }
+.lang-list a:hover { background: var(--surface-2); }
+.lang-list a[aria-current] { font-weight: 650; }
+.lang-list .icon { width: 16px; height: 16px; color: var(--violet); }
 /* На узком экране кнопка чата короче, чтобы в шапку влез переключатель языка */
 .top .btn .short { display: none; }
 @media (max-width: 559px) {
   .top .wrap { gap: 12px; }
   .top .btn { padding: 8px 14px; }
-  .top .langs { gap: 4px; }
-  .top .lang { padding: 6px 8px; }
+  .lang-menu summary { padding: 6px 8px; }
   .top .btn .long { display: none; }
   .top .btn .short { display: inline; }
 }
 @media (max-width: 379px) {
   .logo { font-size: 15px; gap: 8px; }
   .top .wrap { gap: 8px; padding: 0 12px; }
-  .top .lang { padding: 6px 6px; }
+  .lang-menu summary { gap: 4px; padding: 6px 6px; }
+  .lang-menu summary .globe { display: none; }
   .top .btn { padding: 8px 12px; }
 }
-footer .lang { display: inline; padding: 0; border: 0; font-size: inherit; font-weight: inherit; }
 
 /* --- кнопки --- */
 .btn {
@@ -359,6 +366,7 @@ footer nav { display: flex; flex-wrap: wrap; gap: 8px 20px; }
 footer a { text-decoration: none; }
 footer a:hover { color: var(--text); }
 </style>
+<script src="/lang.js" defer></script>
 <!--__ANALYTICS__-->
 </head>
 <body>
@@ -400,7 +408,14 @@ footer a:hover { color: var(--text); }
       <a href="#faq">FAQ</a>
       <a href="#download">Download</a>
     </nav>
-    <span class="langs"><a class="lang" href="/uk" hreflang="uk" lang="uk" title="Українська версія">UA</a><a class="lang" href="/" hreflang="ru" lang="ru" title="Русская версия">RU</a></span>
+    <details class="lang-menu">
+      <summary aria-label="Language: English" title="Language"><svg class="icon globe" aria-hidden="true"><use href="#i-globe"/></svg>EN<svg class="icon chev" aria-hidden="true"><use href="#i-chevron"/></svg></summary>
+      <ul class="lang-list">
+        <li><a href="/" hreflang="ru" lang="ru">Русский</a></li>
+        <li><a href="/en" hreflang="en" lang="en" aria-current="page">English<svg class="icon" aria-hidden="true"><use href="#i-check"/></svg></a></li>
+        <li><a href="/uk" hreflang="uk" lang="uk">Українська</a></li>
+      </ul>
+    </details>
     <a class="btn btn-primary" href="https://chat.tempmessenger.tech/"><span class="long">Open chat</span><span class="short">Chat</span></a>
   </div>
 </header>
