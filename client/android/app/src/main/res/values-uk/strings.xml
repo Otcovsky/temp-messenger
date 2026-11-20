@@ -1,0 +1,12 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="notify_message">Нове повідомлення</string>
+    <string name="notify_call">Вхідний дзвінок</string>
+    <string name="notify_call_body">Натисніть, щоб відповісти</string>
+    <string name="notify_missed">Пропущений дзвінок</string>
+    <string name="channel_messages">Повідомлення</string>
+    <string name="channel_messages_desc">Нові повідомлення</string>
+    <string name="channel_calls">Вхідні дзвінки</string>
+    <string name="channel_calls_desc">Дзвінок із мелодією, доки не відповісте</string>
+    <string name="channel_missed">Пропущені дзвінки</string>
+</resources>

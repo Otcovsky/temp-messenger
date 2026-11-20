@@ -4,6 +4,7 @@ import type { Conversation, Message } from '../storage/db'
 import { en } from './en'
 import { setLang, t } from '.'
 import { ru } from './ru'
+import { uk } from './uk'
 import type { Entry, Key } from './types'
 
 const forms = (e: Entry) => (typeof e === 'string' ? [e] : Object.values(e).filter((x): x is string => !!x))
@@ -14,7 +15,7 @@ afterEach(() => setLang('ru', false))
 describe('словари', () => {
   it('в переводе те же подстановки, что в русском', () => {
     for (const key of Object.keys(ru) as Key[]) {
-      expect([...params(en[key])].sort(), key).toEqual([...params(ru[key])].sort())
+      for (const dict of [en, uk]) expect([...params(dict[key])].sort(), key).toEqual([...params(ru[key])].sort())
     }
   })
 
@@ -25,6 +26,10 @@ describe('словари', () => {
     ])
     setLang('en', false)
     expect([1, 2, 21].map((n) => t('group.members', { n }))).toEqual(['1 member', '2 members', '21 members'])
+    setLang('uk', false)
+    expect([1, 3, 5, 11, 21, 22].map((n) => t('file.count', { n }))).toEqual([
+      '1 файл', '3 файли', '5 файлів', '11 файлів', '21 файл', '22 файли',
+    ])
   })
 
   it('незнакомая подстановка остаётся как есть', () => {

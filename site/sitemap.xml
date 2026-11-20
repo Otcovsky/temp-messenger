@@ -5,6 +5,7 @@
     <lastmod>__LASTMOD__</lastmod>
     <xhtml:link rel="alternate" hreflang="ru" href="https://tempmessenger.tech/"/>
     <xhtml:link rel="alternate" hreflang="en" href="https://tempmessenger.tech/en"/>
+    <xhtml:link rel="alternate" hreflang="uk" href="https://tempmessenger.tech/uk"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://tempmessenger.tech/en"/>
   </url>
   <url>
@@ -12,6 +13,15 @@
     <lastmod>__LASTMOD__</lastmod>
     <xhtml:link rel="alternate" hreflang="ru" href="https://tempmessenger.tech/"/>
     <xhtml:link rel="alternate" hreflang="en" href="https://tempmessenger.tech/en"/>
+    <xhtml:link rel="alternate" hreflang="uk" href="https://tempmessenger.tech/uk"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://tempmessenger.tech/en"/>
+  </url>
+  <url>
+    <loc>https://tempmessenger.tech/uk</loc>
+    <lastmod>__LASTMOD__</lastmod>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://tempmessenger.tech/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://tempmessenger.tech/en"/>
+    <xhtml:link rel="alternate" hreflang="uk" href="https://tempmessenger.tech/uk"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://tempmessenger.tech/en"/>
   </url>
 </urlset>

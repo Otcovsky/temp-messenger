@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Сборка сайта tempmessenger.tech в site/dist: русская страница (/) и английская (/en/).
+# Сборка сайта tempmessenger.tech в site/dist: русская страница (/), английская (/en) и украинская (/uk).
 # Подставляет в страницы версию, размер и отпечаток подписи APK, в sitemap — дату.
-# Тексты страниц правятся вручную в site/index.html и site/en/index.html; разметка и стили у них одинаковые.
+# Тексты страниц правятся вручную в site/index.html, site/en/index.html и site/uk/index.html; разметка и стили у них одинаковые.
 # Запуск из любой папки: bash site/build.sh
 # APK по умолчанию — свежая сборка `npm --prefix client run apk`; другой файл: TM_APK=путь.
 # Аналитика Google — только на этом сайте. ID контейнера (GTM-...) или потока GA4 (G-...) —
@@ -39,20 +39,23 @@ MIN_CODE="${TM_APK_MIN_CODE:-1}"
 BYTES="$(wc -c < "$APK" | tr -d ' ')"
 SIZE_EN="$(awk -v b="$BYTES" 'BEGIN { printf "%.1f MB", b / 1048576 }')"
 SIZE="$(echo "$SIZE_EN" | sed 's/\./,/; s/MB/МБ/')"
+SIZE_UK="$SIZE"
 CERT=""
 CERT_EN=""
+CERT_UK=""
 if [ -n "$APKSIGNER" ]; then
   SHA="$("$APKSIGNER" verify --print-certs "$APK" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr -d '\r')"
   if [ -n "$SHA" ]; then
     CERT="<br>SHA-256 подписи: <code>$SHA</code>"
     CERT_EN="<br>Signing certificate SHA-256: <code>$SHA</code>"
+    CERT_UK="<br>SHA-256 підпису: <code>$SHA</code>"
   fi
 else
   echo "Нет apksigner — отпечаток подписи на страницу не попадёт" >&2
 fi
 
 rm -rf "$OUT"
-mkdir -p "$OUT/download" "$OUT/en"
+mkdir -p "$OUT/download" "$OUT/en" "$OUT/uk"
 ANALYTICS=""
 if [ -n "$GA_ID" ]; then
   case "$GA_ID" in
@@ -69,6 +72,7 @@ fi
 page() { sed -e "s|__APK_VERSION__|$VERSION|g" -e "s|__APK_SIZE__|$2|g" -e "s|__APK_CERT__|$3|g" -e "s|<!--__ANALYTICS__-->|$ANALYTICS|" "$1"; }
 page site/index.html "$SIZE" "$CERT" > "$OUT/index.html"
 page site/en/index.html "$SIZE_EN" "$CERT_EN" > "$OUT/en/index.html"
+page site/uk/index.html "$SIZE_UK" "$CERT_UK" > "$OUT/uk/index.html"
 sed -e "s|__LASTMOD__|$(date -u +%F)|" site/sitemap.xml > "$OUT/sitemap.xml"
 cp site/404.html site/robots.txt site/og.png "$OUT/"
 cp client/public/favicon-32.png client/public/apple-touch-icon.png client/public/icon-192.png "$OUT/"
@@ -77,7 +81,7 @@ cp "$APK" "$OUT/download/temp-messenger.apk"
 # намеренно: адрес скачивания зашит в приложении, подменённый файл не уведёт на чужой APK.
 printf '{"versionCode":%s,"versionName":"%s","minVersionCode":%s}\n' "$CODE" "$VERSION" "$MIN_CODE" > "$OUT/download/version.json"
 
-if grep -qE '__(APK_[A-Z]+|LASTMOD|ANALYTICS|GA_ID)__' "$OUT"/index.html "$OUT"/en/index.html "$OUT"/sitemap.xml "$OUT"/*.js 2>/dev/null; then
+if grep -qE '__(APK_[A-Z]+|LASTMOD|ANALYTICS|GA_ID)__' "$OUT"/index.html "$OUT"/en/index.html "$OUT"/uk/index.html "$OUT"/sitemap.xml "$OUT"/*.js 2>/dev/null; then
   echo "Остались незаполненные метки" >&2; exit 1
 fi
 echo "==> site/dist готов: APK $VERSION (versionCode $CODE, минимум $MIN_CODE), $SIZE${SHA:+, подпись ${SHA:0:8}…}, аналитика: ${GA_ID:-нет}"

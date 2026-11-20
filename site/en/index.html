@@ -8,6 +8,7 @@
 <link rel="canonical" href="https://tempmessenger.tech/en">
 <link rel="alternate" hreflang="ru" href="https://tempmessenger.tech/">
 <link rel="alternate" hreflang="en" href="https://tempmessenger.tech/en">
+<link rel="alternate" hreflang="uk" href="https://tempmessenger.tech/uk">
 <link rel="alternate" hreflang="x-default" href="https://tempmessenger.tech/en">
 <meta name="robots" content="index, follow, max-image-preview:large">
 <meta name="theme-color" content="#f5f4fb" media="(prefers-color-scheme: light)">
@@ -21,6 +22,7 @@
 <meta property="og:site_name" content="Temp Messenger">
 <meta property="og:locale" content="en_US">
 <meta property="og:locale:alternate" content="ru_RU">
+<meta property="og:locale:alternate" content="uk_UA">
 <meta property="og:url" content="https://tempmessenger.tech/en">
 <meta property="og:title" content="Temp Messenger — a messenger with no sign-up and no phone number">
 <meta property="og:description" content="End-to-end encryption, calls and files. Your conversations live only on your device; the server sees nothing but ciphertext.">
@@ -39,7 +41,7 @@
       "@id": "https://tempmessenger.tech/#site",
       "url": "https://tempmessenger.tech/",
       "name": "Temp Messenger",
-      "inLanguage": ["ru", "en"]
+      "inLanguage": ["ru", "en", "uk"]
     },
     {
       "@type": "SoftwareApplication",
@@ -189,22 +191,30 @@ p { margin: 0; }
 .nav { display: none; gap: 22px; margin-left: auto; font-size: 15px; }
 .nav a { text-decoration: none; color: var(--muted); }
 .nav a:hover { color: var(--text); }
-@media (min-width: 820px) { .nav { display: flex; } }
+@media (min-width: 960px) { .nav { display: flex; } }
 .top .btn { padding: 8px 16px; font-size: 15px; min-height: 40px; }
 /* Переключатель языка — в шапке на любой ширине и в подвале */
 .lang { display: inline-flex; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--line); font-size: 14px; font-weight: 650; color: var(--muted); text-decoration: none; }
 .lang:hover { color: var(--text); background: var(--surface-2); }
-.top .lang { margin-left: auto; }
-@media (min-width: 820px) { .top .lang { margin-left: 0; } }
-/* На узком телефоне кнопка чата короче, чтобы в шапку влез переключатель языка */
+.langs { display: inline-flex; gap: 6px; }
+.top .langs { margin-left: auto; }
+@media (min-width: 960px) { .top .langs { margin-left: 0; } }
+/* На узком экране кнопка чата короче, чтобы в шапку влез переключатель языка */
 .top .btn .short { display: none; }
-@media (max-width: 479px) {
+@media (max-width: 559px) {
   .top .wrap { gap: 12px; }
   .top .btn { padding: 8px 14px; }
+  .top .langs { gap: 4px; }
+  .top .lang { padding: 6px 8px; }
   .top .btn .long { display: none; }
   .top .btn .short { display: inline; }
 }
-@media (max-width: 340px) { .logo { font-size: 15px; gap: 8px; } }
+@media (max-width: 379px) {
+  .logo { font-size: 15px; gap: 8px; }
+  .top .wrap { gap: 8px; padding: 0 12px; }
+  .top .lang { padding: 6px 6px; }
+  .top .btn { padding: 8px 12px; }
+}
 footer .lang { display: inline; padding: 0; border: 0; font-size: inherit; font-weight: inherit; }
 
 /* --- кнопки --- */
@@ -390,7 +400,7 @@ footer a:hover { color: var(--text); }
       <a href="#faq">FAQ</a>
       <a href="#download">Download</a>
     </nav>
-    <a class="lang" href="/" hreflang="ru" lang="ru" title="Русская версия">RU</a>
+    <span class="langs"><a class="lang" href="/uk" hreflang="uk" lang="uk" title="Українська версія">UA</a><a class="lang" href="/" hreflang="ru" lang="ru" title="Русская версия">RU</a></span>
     <a class="btn btn-primary" href="https://chat.tempmessenger.tech/"><span class="long">Open chat</span><span class="short">Chat</span></a>
   </div>
 </header>
@@ -630,6 +640,7 @@ footer a:hover { color: var(--text); }
       <a href="#faq">FAQ</a>
       <a href="https://github.com/Otcovsky/temp-messenger">Source code</a>
       <a href="mailto:feedback@tempmessenger.tech">Contact us</a>
+      <a class="lang" href="/uk" hreflang="uk" lang="uk">Українська</a>
       <a class="lang" href="/" hreflang="ru" lang="ru">Русский</a>
     </nav>
   </div>

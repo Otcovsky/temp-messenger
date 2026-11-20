@@ -5,7 +5,7 @@
     <string name="package_name">tech.tempmessenger.app</string>
     <string name="custom_url_scheme">tech.tempmessenger.app</string>
 
-    <!-- Уведомления: английский — запасной язык; русский в values-ru. Язык выбирается в приложении (TmNotifier.localized) -->
+    <!-- Уведомления: английский — запасной язык; русский в values-ru, украинский в values-uk. Язык выбирается в приложении (TmNotifier.localized) -->
     <string name="notify_message">New message</string>
     <string name="notify_call">Incoming call</string>
     <string name="notify_call_body">Tap to answer</string>

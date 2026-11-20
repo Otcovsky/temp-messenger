@@ -1,0 +1,649 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Temp Messenger — анонімний месенджер без реєстрації та номера телефону</title>
+<meta name="description" content="Одноразовий месенджер із наскрізним шифруванням: без акаунта, номера телефону й пошти. Листування, файли та дзвінки зберігаються лише на вашому пристрої. У браузері та на Android.">
+<link rel="canonical" href="https://tempmessenger.tech/uk">
+<link rel="alternate" hreflang="ru" href="https://tempmessenger.tech/">
+<link rel="alternate" hreflang="en" href="https://tempmessenger.tech/en">
+<link rel="alternate" hreflang="uk" href="https://tempmessenger.tech/uk">
+<link rel="alternate" hreflang="x-default" href="https://tempmessenger.tech/en">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta name="theme-color" content="#f5f4fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f0d19" media="(prefers-color-scheme: dark)">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Temp Messenger">
+<meta property="og:locale" content="uk_UA">
+<meta property="og:locale:alternate" content="ru_RU">
+<meta property="og:locale:alternate" content="en_US">
+<meta property="og:url" content="https://tempmessenger.tech/uk">
+<meta property="og:title" content="Temp Messenger — месенджер без реєстрації та номера телефону">
+<meta property="og:description" content="Наскрізне шифрування, дзвінки й файли. Листування живе лише на вашому пристрої, сервер бачить тільки шифротекст.">
+<meta property="og:image" content="https://tempmessenger.tech/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Temp Messenger — листування, яке живе лише на вашому пристрої">
+<meta name="twitter:card" content="summary_large_image">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": "https://tempmessenger.tech/#site",
+      "url": "https://tempmessenger.tech/",
+      "name": "Temp Messenger",
+      "inLanguage": ["ru", "en", "uk"]
+    },
+    {
+      "@type": "SoftwareApplication",
+      "name": "Temp Messenger",
+      "url": "https://tempmessenger.tech/uk",
+      "applicationCategory": "CommunicationApplication",
+      "operatingSystem": "Android 7.0+, Web",
+      "softwareVersion": "__APK_VERSION__ (бета)",
+      "description": "Одноразовий месенджер із наскрізним шифруванням без реєстрації, номера телефону й пошти. Повідомлення, файли та дзвінки; листування зберігається лише на пристрої.",
+      "image": "https://tempmessenger.tech/og.png",
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "UAH" },
+      "featureList": [
+        "Без реєстрації, номера телефону й пошти",
+        "Наскрізне шифрування (X25519, AES-256-GCM, Double Ratchet)",
+        "Аудіо- та відеодзвінки",
+        "Файли до 25 МБ",
+        "Групові чати",
+        "Листування зберігається лише на пристрої"
+      ]
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Чи потрібен номер телефону або пошта?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Ні. Ви просто називаєте себе — під цим ім’ям вас побачать співрозмовники. Особистість — це пара ключів, яку пристрій створює сам." }
+        },
+        {
+          "@type": "Question",
+          "name": "Що бачить сервер?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Лише зашифровані пакети, адресовані випадковим поштовим скринькам. Тексту, імен, файлів і відправника він не бачить. Недоставлене зберігається до 7 днів і видаляється одразу після отримання. Журнали відвідувань з IP-адресами не ведуться." }
+        },
+        {
+          "@type": "Question",
+          "name": "Як перевірити, що сервер не читає листування?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Код месенджера відкритий: застосунок, сервер і опис протоколу лежать на GitHub. Повідомлення шифруються на вашому пристрої, і на сервер іде вже шифротекст — це видно з коду. Незалежного аудиту поки не було." }
+        },
+        {
+          "@type": "Question",
+          "name": "Де зберігається листування?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Лише на вашому пристрої: у сховищі браузера або в пам’яті застосунку. Резервних копій на сервері немає." }
+        },
+        {
+          "@type": "Question",
+          "name": "Чи можна відновити листування?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Ні. Якщо очистити дані сайту, видалити застосунок або загубити телефон, ключі й листування зникнуть назавжди. Відновлювати нічого і ні в кого." }
+        },
+        {
+          "@type": "Question",
+          "name": "Чи працює на iPhone?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Так, через Safari: відкрийте chat.tempmessenger.tech і додайте сайт на початковий екран. Окремий застосунок для iPhone — у планах." }
+        },
+        {
+          "@type": "Question",
+          "name": "Чому APK, а не Google Play?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Застосунок готується до публікації в магазинах. Поки що його можна встановити файлом: Android один раз попросить дозволити встановлення з цього джерела." }
+        },
+        {
+          "@type": "Question",
+          "name": "Це вже готова версія?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Ні, це рання бета. Основне вже працює: листування, файли, групи, дзвінки. Але можливі помилки, а можливості доопрацьовуватимуться й поповнюватимуться." }
+        },
+        {
+          "@type": "Question",
+          "name": "Скільки це коштує?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Безкоштовно. Акаунта немає, тому й підписки немає." }
+        }
+      ]
+    }
+  ]
+}
+</script>
+
+<style>
+:root {
+  --bg: #f5f4fb;
+  --surface: #ffffff;
+  --surface-2: #eeecf7;
+  --text: #17142a;
+  --muted: #5b5872;
+  --line: rgb(23 20 42 / 0.08);
+  --violet: #7c3aed;
+  --brand: linear-gradient(135deg, #6366f1 0%, #8b5cf6 45%, #d946ef 100%);
+  --brand-soft: linear-gradient(135deg, rgb(99 102 241 / 0.12), rgb(217 70 239 / 0.12));
+  --glow-a: rgb(99 102 241 / 0.22);
+  --glow-b: rgb(217 70 239 / 0.16);
+  --warn-bg: #fff7e6;
+  --warn-text: #7a4b00;
+  --warn-line: rgb(217 119 6 / 0.25);
+  --bubble-in: #ffffff;
+  --shadow: 0 1px 2px rgb(23 20 42 / 0.04), 0 8px 24px rgb(23 20 42 / 0.06);
+  --radius: 20px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f0d19;
+    --surface: #181527;
+    --surface-2: #221e35;
+    --text: #ecebf5;
+    --muted: #a19db8;
+    --line: rgb(255 255 255 / 0.08);
+    --violet: #a78bfa;
+    --glow-a: rgb(99 102 241 / 0.28);
+    --glow-b: rgb(217 70 239 / 0.2);
+    --warn-bg: rgb(245 158 11 / 0.08);
+    --warn-text: #fcd34d;
+    --warn-line: rgb(245 158 11 / 0.22);
+    --bubble-in: #221e35;
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 10px 30px rgb(0 0 0 / 0.35);
+  }
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.6 system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  overflow-x: hidden;
+}
+a { color: inherit; }
+img, svg { display: block; }
+h1, h2, h3 { line-height: 1.15; letter-spacing: -0.02em; margin: 0; text-wrap: balance; }
+p { margin: 0; }
+.icon { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+.wrap { width: 100%; max-width: 1120px; margin: 0 auto; padding: 0 16px; }
+@media (min-width: 640px) { .wrap { padding: 0 28px; } }
+.grad-text { background: var(--brand); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.skip { position: absolute; left: -9999px; }
+.skip:focus { left: 16px; top: 12px; z-index: 10; background: var(--surface); padding: 8px 14px; border-radius: 10px; }
+:focus-visible { outline: 2px solid var(--violet); outline-offset: 3px; border-radius: 8px; }
+
+/* --- шапка --- */
+.top {
+  position: sticky; top: 0; z-index: 5;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  -webkit-backdrop-filter: saturate(160%) blur(14px);
+  backdrop-filter: saturate(160%) blur(14px);
+  border-bottom: 1px solid var(--line);
+}
+.top .wrap { display: flex; align-items: center; gap: 24px; height: 60px; }
+.logo { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 17px; letter-spacing: -0.01em; text-decoration: none; }
+.logo img { width: 30px; height: 30px; border-radius: 8px; }
+.nav { display: none; gap: 22px; margin-left: auto; font-size: 15px; }
+.nav a { text-decoration: none; color: var(--muted); }
+.nav a:hover { color: var(--text); }
+@media (min-width: 960px) { .nav { display: flex; } }
+.top .btn { padding: 8px 16px; font-size: 15px; min-height: 40px; }
+/* Переключатель языка — в шапке на любой ширине и в подвале */
+.lang { display: inline-flex; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--line); font-size: 14px; font-weight: 650; color: var(--muted); text-decoration: none; }
+.lang:hover { color: var(--text); background: var(--surface-2); }
+.langs { display: inline-flex; gap: 6px; }
+.top .langs { margin-left: auto; }
+@media (min-width: 960px) { .top .langs { margin-left: 0; } }
+/* На узком экране кнопка чата короче, чтобы в шапку влез переключатель языка */
+.top .btn .short { display: none; }
+@media (max-width: 559px) {
+  .top .wrap { gap: 12px; }
+  .top .btn { padding: 8px 14px; }
+  .top .langs { gap: 4px; }
+  .top .lang { padding: 6px 8px; }
+  .top .btn .long { display: none; }
+  .top .btn .short { display: inline; }
+}
+@media (max-width: 379px) {
+  .logo { font-size: 15px; gap: 8px; }
+  .top .wrap { gap: 8px; padding: 0 12px; }
+  .top .lang { padding: 6px 6px; }
+  .top .btn { padding: 8px 12px; }
+}
+footer .lang { display: inline; padding: 0; border: 0; font-size: inherit; font-weight: inherit; }
+
+/* --- кнопки --- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 50px; padding: 12px 22px; border-radius: 14px;
+  font-weight: 650; font-size: 16px; text-decoration: none; white-space: nowrap;
+  transition: filter .15s, background-color .15s, transform .15s;
+}
+.btn:active { transform: translateY(1px); }
+.btn-primary { background: var(--brand); color: #fff; box-shadow: 0 8px 22px rgb(139 92 246 / 0.32); }
+.btn-primary:hover { filter: brightness(1.1); }
+.btn-soft { background: var(--surface); color: var(--text); border: 1px solid var(--line); box-shadow: var(--shadow); }
+.btn-soft:hover { background: var(--surface-2); }
+
+/* --- первый экран --- */
+.hero { position: relative; isolation: isolate; padding: 48px 0 64px; }
+.hero::before {
+  content: ""; position: absolute; inset: -60px 0 0; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(55% 55% at 0% 0%, var(--glow-a), transparent 70%),
+    radial-gradient(45% 50% at 100% 15%, var(--glow-b), transparent 70%);
+}
+.hero .wrap { display: grid; gap: 48px; align-items: center; }
+@media (min-width: 900px) { .hero { padding: 80px 0 96px; } .hero .wrap { grid-template-columns: 1.15fr 0.85fr; } }
+.badge {
+  display: inline-flex; align-items: center; gap: 8px; margin-bottom: 18px;
+  padding: 6px 12px 6px 8px; border-radius: 999px; font-size: 14px; font-weight: 600;
+  background: var(--brand-soft); color: var(--violet);
+}
+.badge .icon { width: 18px; height: 18px; }
+.badges { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.badges .badge { margin-bottom: 0; }
+.badge-beta { background: var(--warn-bg); color: var(--warn-text); border: 1px solid var(--warn-line); padding-left: 12px; }
+.beta { padding: 2px 7px; border-radius: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; background: var(--warn-bg); color: var(--warn-text); border: 1px solid var(--warn-line); }
+.logo { white-space: nowrap; }
+@media (max-width: 420px) { .logo .beta { display: none; } }
+.beta-note { max-width: 820px; margin: 18px auto 0; display: flex; gap: 12px; align-items: flex-start; text-align: left; padding: 16px 18px; border-radius: 16px; font-size: 15px; background: var(--warn-bg); color: var(--warn-text); border: 1px solid var(--warn-line); }
+.beta-note .icon { margin-top: 1px; }
+.hero h1 { font-size: clamp(34px, 7.2vw, 58px); font-weight: 850; }
+.lead { margin-top: 18px; font-size: clamp(17px, 2.3vw, 20px); color: var(--muted); max-width: 34em; }
+.cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
+.cta .btn { flex: 1 1 220px; }
+@media (min-width: 560px) { .cta .btn { flex: 0 0 auto; } }
+.facts { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 22px 0 0; padding: 0; list-style: none; font-size: 14px; color: var(--muted); }
+.facts li { display: flex; align-items: center; gap: 6px; }
+.facts .icon { width: 17px; height: 17px; color: var(--violet); }
+
+/* макет чата */
+.mock {
+  position: relative; max-width: 380px; width: 100%; margin: 0 auto;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 28px;
+  box-shadow: 0 30px 80px rgb(91 33 182 / 0.18), var(--shadow); overflow: hidden;
+}
+.mock-head { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+.ava { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-weight: 700; background: linear-gradient(135deg, #f59e0b, #ec4899); }
+.mock-head b { display: block; font-size: 15px; }
+.mock-head small { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+.mock-head small .icon { width: 13px; height: 13px; color: #10b981; }
+.mock-head .call { margin-left: auto; display: flex; gap: 14px; color: var(--violet); }
+.mock-body { display: flex; flex-direction: column; gap: 8px; padding: 18px 14px 20px; background: var(--brand-soft); min-height: 300px; }
+.b { max-width: 78%; padding: 9px 13px; border-radius: 18px; font-size: 14.5px; line-height: 1.4; }
+.b-in { align-self: flex-start; background: var(--bubble-in); border-bottom-left-radius: 6px; box-shadow: 0 1px 2px rgb(0 0 0 / 0.06); }
+.b-out { align-self: flex-end; background: var(--brand); color: #fff; border-bottom-right-radius: 6px; }
+.b small { display: block; text-align: right; font-size: 11px; opacity: 0.7; margin-top: 2px; }
+.b-file { display: flex; align-items: center; gap: 10px; }
+.b-file .tile { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: rgb(255 255 255 / 0.22); }
+.b-file .tile .icon { width: 18px; height: 18px; }
+.sys { align-self: center; font-size: 12px; color: var(--muted); background: var(--surface); padding: 4px 10px; border-radius: 999px; display: flex; gap: 6px; align-items: center; }
+.sys .icon { width: 13px; height: 13px; }
+
+/* --- секции --- */
+section { scroll-margin-top: 72px; }
+.sec { padding: 64px 0; }
+@media (min-width: 900px) { .sec { padding: 96px 0; } }
+.sec-head { max-width: 640px; margin-bottom: 36px; }
+.eyebrow { font-size: 13px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--violet); margin-bottom: 10px; }
+.sec h2 { font-size: clamp(28px, 4.6vw, 40px); font-weight: 800; }
+.sec-head p { margin-top: 12px; color: var(--muted); font-size: 17px; }
+
+.grid { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 640px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 980px) { .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; box-shadow: var(--shadow); }
+.card h3 { font-size: 18px; font-weight: 700; margin: 16px 0 8px; }
+.card p { color: var(--muted); font-size: 15.5px; }
+.ic { width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center; background: var(--brand); color: #fff; box-shadow: 0 6px 16px rgb(139 92 246 / 0.3); }
+
+.steps { counter-reset: s; list-style: none; margin: 0; padding: 0; }
+.steps li { counter-increment: s; position: relative; }
+.steps li::before {
+  content: counter(s); display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px;
+  font-weight: 800; font-size: 18px; background: var(--brand-soft); color: var(--violet);
+}
+
+.alt { background: var(--surface); border-block: 1px solid var(--line); }
+.alt .card { background: var(--bg); box-shadow: none; }
+
+.honest { display: grid; gap: 20px; padding: 28px; border-radius: 24px; background: var(--warn-bg); border: 1px solid var(--warn-line); }
+@media (min-width: 760px) { .honest { grid-template-columns: auto 1fr; padding: 36px; gap: 28px; } }
+.honest .ic { background: #f59e0b; box-shadow: 0 6px 16px rgb(245 158 11 / 0.3); }
+.honest h2 { font-size: clamp(24px, 3.6vw, 30px); }
+.honest p { margin-top: 10px; color: var(--warn-text); font-size: 16.5px; }
+
+/* --- вопросы --- */
+.faq { max-width: 820px; display: grid; gap: 10px; }
+.faq details { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; }
+.faq summary {
+  list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 18px 20px; font-weight: 650; font-size: 16.5px;
+}
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary .icon { color: var(--muted); transition: transform .2s; }
+.faq details[open] summary .icon { transform: rotate(180deg); }
+.faq details p { padding: 0 20px 20px; color: var(--muted); }
+
+/* --- скачать --- */
+.get { position: relative; isolation: isolate; text-align: center; }
+.get::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: radial-gradient(50% 60% at 50% 100%, var(--glow-a), transparent 70%), radial-gradient(40% 50% at 85% 30%, var(--glow-b), transparent 70%);
+}
+.get .sec-head { margin: 0 auto 36px; }
+.get .grid { max-width: 820px; margin: 0 auto; text-align: left; }
+.get .card { display: flex; flex-direction: column; }
+.get .card p { flex: 1; }
+.get .btn { margin-top: 22px; width: 100%; white-space: normal; text-align: center; }
+.meta { margin-top: 12px; font-size: 13px; color: var(--muted); text-align: center; overflow-wrap: anywhere; }
+.meta code { font: 12px/1.5 ui-monospace, 'SF Mono', Consolas, monospace; }
+
+/* --- открытый код --- */
+.open .card { display: flex; flex-direction: column; }
+.open .card > p:not(.meta) { flex: 1; }
+.links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
+.links .btn { flex: 1 1 100%; white-space: normal; text-align: center; overflow-wrap: anywhere; }
+.meta a { color: inherit; }
+.meta a:hover { color: var(--text); }
+
+footer { border-top: 1px solid var(--line); padding: 28px 0 calc(28px + env(safe-area-inset-bottom)); font-size: 14px; color: var(--muted); }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 10px 24px; justify-content: space-between; align-items: center; }
+footer nav { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+footer a { text-decoration: none; }
+footer a:hover { color: var(--text); }
+</style>
+<!--__ANALYTICS__-->
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+  <symbol id="i-user-x" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m17 8 5 5"/><path d="m22 8-5 5"/></symbol>
+  <symbol id="i-server" viewBox="0 0 24 24"><rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><path d="M6 6h.01"/><path d="M6 18h.01"/></symbol>
+  <symbol id="i-video" viewBox="0 0 24 24"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="2"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+  <symbol id="i-android" viewBox="0 0 24 24"><rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 18h.01"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></symbol>
+  <symbol id="i-mail" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></symbol>
+  <symbol id="i-message" viewBox="0 0 24 24"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></symbol>
+  <symbol id="i-bug" viewBox="0 0 24 24"><path d="m8 2 1.88 1.88"/><path d="M14.12 3.88 16 2"/><path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"/><path d="M12 20v-9"/><path d="M6.53 9C4.6 8.8 3 7.1 3 5"/><path d="M6 13H2"/><path d="M3 21c0-2.1 1.7-3.9 3.8-4"/><path d="M20.97 5c0 2.1-1.6 3.8-3.5 4"/><path d="M22 13h-4"/><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></symbol>
+</svg>
+
+<a class="skip" href="#main">До змісту</a>
+
+<header class="top">
+  <div class="wrap">
+    <a class="logo" href="/uk" aria-label="Temp Messenger — на головну">
+      <img src="/icon-192.png" width="30" height="30" alt="">
+      <span>Temp Messenger</span>
+      <span class="beta" title="Рання бета-версія">бета</span>
+    </a>
+    <nav class="nav" aria-label="Розділи">
+      <a href="#features">Можливості</a>
+      <a href="#how">Як це працює</a>
+      <a href="#faq">Питання</a>
+      <a href="#download">Завантажити</a>
+    </nav>
+    <span class="langs"><a class="lang" href="/en" hreflang="en" lang="en" title="English version">EN</a><a class="lang" href="/" hreflang="ru" lang="ru" title="Русская версия">RU</a></span>
+    <a class="btn btn-primary" href="https://chat.tempmessenger.tech/"><span class="long">Відкрити чат</span><span class="short">Чат</span></a>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero">
+    <div class="wrap">
+      <div>
+        <div class="badges">
+          <span class="badge"><svg class="icon"><use href="#i-shield"/></svg>Наскрізне шифрування</span>
+          <span class="badge badge-beta">Рання бета-версія</span>
+        </div>
+        <h1>Месенджер, який <span class="grad-text">нічого про&nbsp;вас не&nbsp;знає</span></h1>
+        <p class="lead">Без реєстрації, номера телефону й пошти. Повідомлення, файли та дзвінки шифруються на вашому пристрої — і зберігаються лише на ньому.</p>
+        <div class="cta">
+          <a class="btn btn-primary" href="https://chat.tempmessenger.tech/">Відкрити в браузері<svg class="icon"><use href="#i-arrow"/></svg></a>
+          <a class="btn btn-soft" href="#download"><svg class="icon"><use href="#i-android"/></svg>Застосунок для Android</a>
+        </div>
+        <ul class="facts">
+          <li><svg class="icon"><use href="#i-check"/></svg>Безкоштовно</li>
+          <li><svg class="icon"><use href="#i-check"/></svg>Без акаунта</li>
+          <li><svg class="icon"><use href="#i-check"/></svg>Браузер і Android</li>
+        </ul>
+      </div>
+
+      <div class="mock" role="img" aria-label="Приклад листування в Temp Messenger">
+        <div class="mock-head">
+          <div class="ava">О</div>
+          <div>
+            <b>Оля</b>
+            <small><svg class="icon"><use href="#i-lock"/></svg>зашифровано</small>
+          </div>
+          <div class="call"><svg class="icon"><use href="#i-phone"/></svg><svg class="icon"><use href="#i-video"/></svg></div>
+        </div>
+        <div class="mock-body">
+          <span class="sys"><svg class="icon"><use href="#i-lock"/></svg>Ключі є лише у вас двох</span>
+          <div class="b b-in">Привіт! Скинь договір, перегляну ввечері<small>18:02</small></div>
+          <div class="b b-out b-file"><span class="tile"><svg class="icon"><use href="#i-file"/></svg></span><span>dogovir.pdf<br><span style="opacity:.75;font-size:12px">2,4 МБ</span></span></div>
+          <div class="b b-out">Готово. Після завантаження він зітреться із сервера<small>18:03</small></div>
+          <div class="b b-in">Зручно 👍 Зідзвонимося о 8?<small>18:05</small></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec" id="features" aria-labelledby="features-h">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="eyebrow">Можливості</div>
+        <h2 id="features-h">Усе потрібне для розмови — і нічого зайвого про вас</h2>
+        <p>Temp Messenger задуманий одноразовим: листування належить пристроям співрозмовників, а не серверу.</p>
+      </div>
+      <div class="grid grid-3">
+        <article class="card">
+          <div class="ic"><svg class="icon"><use href="#i-user-x"/></svg></div>
+          <h3>Без номера й пошти</h3>
+          <p>Ваша особистість — пара ключів, яку пристрій створює за секунду. Ніхто не дізнається вашого телефону, і нікому його передати.</p>
+        </article>
+        <article class="card">
+          <div class="ic"><svg class="icon"><use href="#i-lock"/></svg></div>
+          <h3>Наскрізне шифрування</h3>
+          <p>X25519, AES-256-GCM і Double Ratchet: у кожного повідомлення свій ключ. Прочитати його може лише співрозмовник.</p>
+        </article>
+        <article class="card">
+          <div class="ic"><svg class="icon"><use href="#i-server"/></svg></div>
+          <h3>Сервер нічого не зберігає</h3>
+          <p>Він лише передає шифротекст і не знає, хто відправник. Недоставлене чекає на одержувача до 7 днів і видаляється одразу після отримання.</p>
+        </article>
+        <article class="card">
+          <div class="ic"><svg class="icon"><use href="#i-video"/></svg></div>
+          <h3>Аудіо- та відеодзвінки</h3>
+          <p>Дзвінки сам на сам, теж зашифровані: голос і відео йдуть напряму між пристроями або через сервер, який не може їх розшифрувати.</p>
+        </article>
+        <article class="card">
+          <div class="ic"><svg class="icon"><use href="#i-clip"/></svg></div>
+          <h3>Файли до 25 МБ</h3>
+          <p>Фото й документи шифруються одноразовим ключем. Щойно співрозмовник завантажив файл, він стирається із сервера.</p>
+        </article>
+        <article class="card">
+          <div class="ic"><svg class="icon"><use href="#i-users"/></svg></div>
+          <h3>Групові чати</h3>
+          <p>Кожне повідомлення в групі шифрується окремо для кожного учасника. Списку учасників у сервера немає.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec alt" id="how" aria-labelledby="how-h">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="eyebrow">Як це працює</div>
+        <h2 id="how-h">Перше повідомлення — за хвилину</h2>
+      </div>
+      <ol class="grid grid-3 steps">
+        <li class="card">
+          <h3>Назвіться</h3>
+          <p>Відкрийте чат і введіть ім’я, яке побачать співрозмовники. Ключі шифрування створяться просто на пристрої.</p>
+        </li>
+        <li class="card">
+          <h3>Надішліть запрошення</h3>
+          <p>Поділіться посиланням будь-яким способом або покажіть QR-код. Ключ для знайомства схований у самому посиланні й на сервер не потрапляє.</p>
+        </li>
+        <li class="card">
+          <h3>Спілкуйтеся</h3>
+          <p>Пишіть, дзвоніть, надсилайте файли. Захочете зникнути — очистіть дані, і від листування не залишиться сліду.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="sec" aria-labelledby="honest-h">
+    <div class="wrap">
+      <div class="honest">
+        <div class="ic"><svg class="icon"><use href="#i-alert"/></svg></div>
+        <div>
+          <h2 id="honest-h">Чесно про головне: відновлення немає</h2>
+          <p>Немає акаунта — нічого й відновлювати. Якщо очистити дані сайту, видалити застосунок або загубити телефон, контакти й листування зникнуть назавжди. Це не недолік, а сама ідея: те, чого ніде немає, не можна ні вкрасти, ні вимагати.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec open" id="open" aria-labelledby="open-h">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="eyebrow">Відкритий код</div>
+        <h2 id="open-h">Не вірте на слово — перевірте</h2>
+        <p>Увесь код Temp Messenger відкритий: застосунок, сервер і опис протоколу шифрування. Будь-хто може подивитися, що відбувається з повідомленнями, і переконатися, що сервер їх не читає.</p>
+      </div>
+      <div class="grid">
+        <article class="card">
+          <div class="ic"><svg class="icon"><use href="#i-code"/></svg></div>
+          <h3>Вихідний код на GitHub</h3>
+          <p>Браузерна версія, сервер, Android-застосунок і опис протоколу. Ліцензія GNU AGPL v3: змінену версію, якою користуються інші люди, теж потрібно відкрити.</p>
+          <div class="links">
+            <a class="btn btn-primary" href="https://github.com/Otcovsky/temp-messenger">Відкрити репозиторій<svg class="icon"><use href="#i-arrow"/></svg></a>
+          </div>
+          <p class="meta">GNU AGPL v3 · github.com/Otcovsky/temp-messenger</p>
+        </article>
+        <article class="card">
+          <div class="ic"><svg class="icon"><use href="#i-message"/></svg></div>
+          <h3>Відгуки та пропозиції</h3>
+          <p>Знайшли помилку, бракує функції або є ідея, як зробити краще? Напишіть: месенджер у ранній беті, і зараз найкращий час вплинути на те, яким він стане.</p>
+          <div class="links">
+            <a class="btn btn-soft" href="https://github.com/Otcovsky/temp-messenger/issues"><svg class="icon"><use href="#i-bug"/></svg>Повідомити про помилку</a>
+            <a class="btn btn-soft" href="https://github.com/Otcovsky/temp-messenger/discussions"><svg class="icon"><use href="#i-message"/></svg>Ідеї та питання</a>
+            <a class="btn btn-soft" href="mailto:feedback@tempmessenger.tech"><svg class="icon"><use href="#i-mail"/></svg>feedback@tempmessenger.tech</a>
+          </div>
+          <p class="meta">Знайшли вразливість? Будь ласка, не публікуйте її відкрито — <a href="https://github.com/Otcovsky/temp-messenger/security">як повідомити</a></p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec alt" id="faq" aria-labelledby="faq-h">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="eyebrow">Питання</div>
+        <h2 id="faq-h">Часті питання</h2>
+      </div>
+      <div class="faq">
+        <details>
+          <summary>Чи потрібен номер телефону або пошта?<svg class="icon"><use href="#i-chevron"/></svg></summary>
+          <p>Ні. Ви просто називаєте себе — під цим ім’ям вас побачать співрозмовники. Особистість — це пара ключів, яку пристрій створює сам.</p>
+        </details>
+        <details>
+          <summary>Що бачить сервер?<svg class="icon"><use href="#i-chevron"/></svg></summary>
+          <p>Лише зашифровані пакети, адресовані випадковим поштовим скринькам. Тексту, імен, файлів і відправника він не бачить. Недоставлене зберігається до 7 днів і видаляється одразу після отримання. Журнали відвідувань з IP-адресами не ведуться.</p>
+        </details>
+        <details>
+          <summary>Як перевірити, що сервер не читає листування?<svg class="icon"><use href="#i-chevron"/></svg></summary>
+          <p>Код месенджера відкритий: застосунок, сервер і опис протоколу лежать на GitHub. Повідомлення шифруються на вашому пристрої, і на сервер іде вже шифротекст — це видно з коду. Незалежного аудиту поки не було. <a href="https://github.com/Otcovsky/temp-messenger">github.com/Otcovsky/temp-messenger</a></p>
+        </details>
+        <details>
+          <summary>Де зберігається листування?<svg class="icon"><use href="#i-chevron"/></svg></summary>
+          <p>Лише на вашому пристрої: у сховищі браузера або в пам’яті застосунку. Резервних копій на сервері немає.</p>
+        </details>
+        <details>
+          <summary>Чи можна відновити листування?<svg class="icon"><use href="#i-chevron"/></svg></summary>
+          <p>Ні. Якщо очистити дані сайту, видалити застосунок або загубити телефон, ключі й листування зникнуть назавжди. Відновлювати нічого і ні в кого.</p>
+        </details>
+        <details>
+          <summary>Чи працює на iPhone?<svg class="icon"><use href="#i-chevron"/></svg></summary>
+          <p>Так, через Safari: відкрийте chat.tempmessenger.tech і додайте сайт на початковий екран. Окремий застосунок для iPhone — у планах.</p>
+        </details>
+        <details>
+          <summary>Чому APK, а не Google Play?<svg class="icon"><use href="#i-chevron"/></svg></summary>
+          <p>Застосунок готується до публікації в магазинах. Поки що його можна встановити файлом: Android один раз попросить дозволити встановлення з цього джерела.</p>
+        </details>
+        <details>
+          <summary>Це вже готова версія?<svg class="icon"><use href="#i-chevron"/></svg></summary>
+          <p>Ні, це рання бета. Основне вже працює: листування, файли, групи, дзвінки. Але можливі помилки, а можливості доопрацьовуватимуться й поповнюватимуться.</p>
+        </details>
+        <details>
+          <summary>Скільки це коштує?<svg class="icon"><use href="#i-chevron"/></svg></summary>
+          <p>Безкоштовно. Акаунта немає, тому й підписки немає.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec get" id="download" aria-labelledby="download-h">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="eyebrow">Почати</div>
+        <h2 id="download-h">Виберіть, де спілкуватися</h2>
+        <p>Це той самий месенджер: можна листуватися з браузера з тим, у кого застосунок.</p>
+      </div>
+      <div class="grid">
+        <article class="card">
+          <div class="ic"><svg class="icon"><use href="#i-globe"/></svg></div>
+          <h3>У браузері</h3>
+          <p>Нічого не потрібно встановлювати. Працює на комп’ютері, Android та iPhone; на телефоні сайт можна додати на головний екран.</p>
+          <a class="btn btn-primary" href="https://chat.tempmessenger.tech/">Відкрити в браузері<svg class="icon"><use href="#i-arrow"/></svg></a>
+          <p class="meta">chat.tempmessenger.tech · будь-який сучасний браузер</p>
+        </article>
+        <!-- Коли застосунок з’явиться в магазинах, замініть кнопку APK посиланнями на Google Play -->
+        <article class="card">
+          <div class="ic"><svg class="icon"><use href="#i-android"/></svg></div>
+          <h3>Застосунок для Android</h3>
+          <p>Сповіщення про повідомлення та вхідні дзвінки, навіть коли застосунок закрито. Встановлення файлом APK.</p>
+          <a class="btn btn-primary" href="/download/temp-messenger.apk" download>Завантажити APK<svg class="icon"><use href="#i-download"/></svg></a>
+          <p class="meta">Бета __APK_VERSION__ · __APK_SIZE__ · Android 7.0 і новіші__APK_CERT__</p>
+        </article>
+      </div>
+      <p class="beta-note"><svg class="icon"><use href="#i-alert"/></svg><span><b>Це рання бета-версія.</b> Месенджер активно доопрацьовується: можливі помилки, а можливості й зовнішній вигляд змінюватимуться та поповнюватимуться.</span></p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 Temp Messenger</span>
+    <nav aria-label="Посилання">
+      <a href="https://chat.tempmessenger.tech/">Відкрити чат</a>
+      <a href="/download/temp-messenger.apk" download>Завантажити APK</a>
+      <a href="#faq">Питання</a>
+      <a href="https://github.com/Otcovsky/temp-messenger">Вихідний код</a>
+      <a href="mailto:feedback@tempmessenger.tech">Написати нам</a>
+      <a class="lang" href="/en" hreflang="en" lang="en">English</a>
+      <a class="lang" href="/" hreflang="ru" lang="ru">Русский</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

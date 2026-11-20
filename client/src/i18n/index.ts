@@ -15,6 +15,7 @@ export type { Key, Params } from './types'
 /** Языки в переключателе — каждый назван на самом себе */
 export const LANGS: readonly { id: Lang; name: string }[] = [
   { id: 'en', name: 'English' },
+  { id: 'uk', name: 'Українська' },
   { id: 'ru', name: 'Русский' },
 ]
 
