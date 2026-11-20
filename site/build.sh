@@ -5,10 +5,10 @@
 # Запуск из любой папки: bash site/build.sh
 # APK по умолчанию — свежая сборка `npm --prefix client run apk`; другой файл: TM_APK=путь.
 # Аналитика Google — только на этом сайте. ID контейнера (GTM-...) или потока GA4 (G-...) —
-# в TM_GA_ID, по умолчанию контейнер сайта; TM_GA_ID= (пусто) — собрать без аналитики.
+# в TM_GA_ID, по умолчанию поток GA4 сайта; TM_GA_ID= (пусто) — собрать без аналитики.
 set -euo pipefail
 
-GA_ID="${TM_GA_ID-GTM-WCWTGS9G}"
+GA_ID="${TM_GA_ID-G-MEF7YTPJ5K}"
 cd "$(dirname "$0")/.."
 
 OUT=site/dist
